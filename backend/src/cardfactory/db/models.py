@@ -267,6 +267,7 @@ class Card(Timestamped, Base):
     quarantine: Mapped[bool] = mapped_column(Boolean, default=False)
     origin: Mapped[str] = mapped_column(String(20), default="GENERATED")
     production_id: Mapped[str | None] = mapped_column(ForeignKey("production.id"))
+    import_batch_id: Mapped[str | None] = mapped_column(ForeignKey("import_batch.id"))
 
 
 class CardVersion(Timestamped, Base):
@@ -298,3 +299,252 @@ class CardStateEvent(Timestamped, Base):
     actor: Mapped[str] = mapped_column(String(100))
     actor_type: Mapped[str] = mapped_column(String(10))  # AI | HUMAN | SYSTEM
     reason: Mapped[str] = mapped_column(Text, default="")
+
+
+# ------------------------------------------------------------------ biblioteca científica (Fase 2)
+class Source(Timestamped, Base):
+    """Identidade lógica de um documento (ex.: "PCDT de hipertensão"). Título só é confirmado após leitura."""
+
+    __tablename__ = "source"
+    id: Mapped[str] = _id("src")
+    title_claimed: Mapped[str] = mapped_column(String(500), default="")
+    title_confirmed: Mapped[str | None] = mapped_column(String(500))
+    institution: Mapped[str] = mapped_column(String(300), default="")
+    source_tier: Mapped[str] = mapped_column(String(30), default="UNCLASSIFIED")
+    doc_type: Mapped[str] = mapped_column(String(60), default="")
+    doi: Mapped[str | None] = mapped_column(String(200))
+    url: Mapped[str | None] = mapped_column(String(2000))
+    license: Mapped[str] = mapped_column(String(200), default="")
+    rights_status: Mapped[str] = mapped_column(String(30), default="UNKNOWN")
+    created_by: Mapped[str] = mapped_column(String(100), default="system")
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class SourceVersion(Timestamped, Base):
+    __tablename__ = "source_version"
+    id: Mapped[str] = _id("srv")
+    source_id: Mapped[str] = mapped_column(ForeignKey("source.id"), index=True)
+    version_label: Mapped[str] = mapped_column(String(100), default="")
+    published_at: Mapped[str | None] = mapped_column(String(10))
+    page_updated_at: Mapped[str | None] = mapped_column(String(10))
+    effective_from: Mapped[str | None] = mapped_column(String(10))
+    effective_to: Mapped[str | None] = mapped_column(String(10))
+    validity_status: Mapped[str] = mapped_column(String(20), default="UNCERTAIN")
+    supersedes_version_id: Mapped[str | None] = mapped_column(ForeignKey("source_version.id"))
+    population: Mapped[str] = mapped_column(String(300), default="")
+    context: Mapped[str] = mapped_column(String(300), default="")
+
+
+class Document(Timestamped, Base):
+    __tablename__ = "document"
+    id: Mapped[str] = _id("doc")
+    source_version_id: Mapped[str] = mapped_column(ForeignKey("source_version.id"), index=True)
+    access_state: Mapped[str] = mapped_column(String(25), default="FOUND", index=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), index=True)
+    blob_path: Mapped[str | None] = mapped_column(String(500))
+    mime: Mapped[str | None] = mapped_column(String(100))
+    size_bytes: Mapped[int | None] = mapped_column(Integer)
+    pages: Mapped[int | None] = mapped_column(Integer)
+    accessed_at: Mapped[datetime | None]
+    fetch_url: Mapped[str | None] = mapped_column(String(2000))
+    origin: Mapped[str] = mapped_column(String(20), default="FETCH")  # FETCH | USER_UPLOAD | SEARCH
+    parse_report: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    pending_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class DocumentEvent(Timestamped, Base):
+    """[append-only] Transições de estado documental (BIB-003)."""
+
+    __tablename__ = "document_event"
+    id: Mapped[str] = _id("dev")
+    document_id: Mapped[str] = mapped_column(ForeignKey("document.id"), index=True)
+    from_state: Mapped[str] = mapped_column(String(25))
+    to_state: Mapped[str] = mapped_column(String(25))
+    actor: Mapped[str] = mapped_column(String(100))
+    reason: Mapped[str] = mapped_column(Text, default="")
+
+
+class DocumentSection(Base):
+    __tablename__ = "document_section"
+    __table_args__ = (UniqueConstraint("document_id", "ordinal"),)
+    id: Mapped[str] = _id("sec")
+    document_id: Mapped[str] = mapped_column(ForeignKey("document.id"), index=True)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    path: Mapped[str] = mapped_column(String(500), default="")
+    kind: Mapped[str] = mapped_column(String(15), default="TEXT")  # TEXT | TABLE | ALGORITHM | FOOTNOTE
+    page_from: Mapped[int | None] = mapped_column(Integer)
+    page_to: Mapped[int | None] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    parse_quality: Mapped[str] = mapped_column(String(10), default="OK")  # OK | UNCERTAIN | FAILED
+
+
+class EvidenceSpan(Timestamped, Base):
+    __tablename__ = "evidence_span"
+    id: Mapped[str] = _id("ev")
+    section_id: Mapped[str] = mapped_column(ForeignKey("document_section.id"), index=True)
+    quote: Mapped[str] = mapped_column(Text)
+    char_start: Mapped[int] = mapped_column(Integer)
+    char_end: Mapped[int] = mapped_column(Integer)
+    retrieved_via: Mapped[str] = mapped_column(String(20), default="DOCUMENT")
+    created_by_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+
+
+class ResearchQuery(Timestamped, Base):
+    __tablename__ = "research_query"
+    id: Mapped[str] = _id("rq")
+    production_id: Mapped[str | None] = mapped_column(ForeignKey("production.id"))
+    query: Mapped[str] = mapped_column(Text)
+    engine: Mapped[str] = mapped_column(String(60))
+    filters: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    cost_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+    cache_key: Mapped[str] = mapped_column(String(64), index=True)
+
+
+# ------------------------------------------------------------------ conhecimento (Fase 2)
+class ClinicalEntity(Timestamped, Base):
+    __tablename__ = "clinical_entity"
+    __table_args__ = (UniqueConstraint("project_id", "name"),)
+    id: Mapped[str] = _id("ent")
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id"), index=True)
+    name: Mapped[str] = mapped_column(String(300))
+    synonyms: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    home_deck_path: Mapped[str] = mapped_column(String(500), default="")
+
+
+class MapDimension(Timestamped, Base):
+    __tablename__ = "map_dimension"
+    __table_args__ = (UniqueConstraint("entity_id", "dimension_code", "map_origin"),)
+    id: Mapped[str] = _id("md")
+    entity_id: Mapped[str] = mapped_column(ForeignKey("clinical_entity.id"), index=True)
+    dimension_code: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(25))
+    justification: Mapped[str] = mapped_column(Text, default="")
+    map_origin: Mapped[str] = mapped_column(String(15), default="CREATOR")  # CREATOR | INDEPENDENT
+    origin_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+
+
+class DecisionPoint(Timestamped, Base):
+    __tablename__ = "decision_point"
+    id: Mapped[str] = _id("dp")
+    entity_id: Mapped[str] = mapped_column(ForeignKey("clinical_entity.id"), index=True)
+    description: Mapped[str] = mapped_column(Text)
+    condition_axis: Mapped[str] = mapped_column(String(60), default="")
+    disposition_relevant: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class LearningObjective(Timestamped, Base):
+    __tablename__ = "learning_objective"
+    id: Mapped[str] = _id("obj")
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id"), index=True)
+    production_id: Mapped[str | None] = mapped_column(ForeignKey("production.id"), index=True)
+    entity_id: Mapped[str | None] = mapped_column(ForeignKey("clinical_entity.id"), index=True)
+    area: Mapped[str] = mapped_column(String(200), default="")
+    subtopic: Mapped[str] = mapped_column(String(300), default="")
+    knowledge_type: Mapped[str] = mapped_column(String(60), default="")
+    knowledge_level: Mapped[str] = mapped_column(String(15), default="FACTUAL")
+    description: Mapped[str] = mapped_column(Text)
+    clinical_relevance: Mapped[str] = mapped_column(String(10), default="MEDIUM")
+    exam_relevance: Mapped[str] = mapped_column(String(10), default="UNKNOWN")
+    purpose: Mapped[str] = mapped_column(String(30), default="")
+    necessity: Mapped[str] = mapped_column(String(15), default="REQUIRED")
+    coverage_state: Mapped[str] = mapped_column(String(25), default="ABSENT", index=True)
+    planned_cards: Mapped[int] = mapped_column(Integer, default=1)
+    planned_rationale: Mapped[str] = mapped_column(Text, default="")
+    lease_owner: Mapped[str | None] = mapped_column(String(60))
+    lease_expires_at: Mapped[datetime | None]
+    origin_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+
+
+class ObjectiveDependency(Base):
+    __tablename__ = "objective_dependency"
+    objective_id: Mapped[str] = mapped_column(ForeignKey("learning_objective.id"), primary_key=True)
+    depends_on_id: Mapped[str] = mapped_column(ForeignKey("learning_objective.id"), primary_key=True)
+
+
+class Claim(Timestamped, Base):
+    __tablename__ = "claim"
+    id: Mapped[str] = _id("clm")
+    objective_id: Mapped[str | None] = mapped_column(ForeignKey("learning_objective.id"), index=True)
+    card_version_id: Mapped[str | None] = mapped_column(ForeignKey("card_version.id"), index=True)
+    entity_id: Mapped[str | None] = mapped_column(ForeignKey("clinical_entity.id"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    component: Mapped[str] = mapped_column(String(20), default="OTHER")
+    population: Mapped[str] = mapped_column(String(300), default="")
+    scenario: Mapped[str] = mapped_column(String(300), default="")
+    criticality: Mapped[str] = mapped_column(String(10), default="NORMAL")
+    negation_kind: Mapped[str | None] = mapped_column(String(25))
+    numeric: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    origin_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+
+
+class ClaimEvidence(Base):
+    __tablename__ = "claim_evidence"
+    claim_id: Mapped[str] = mapped_column(ForeignKey("claim.id"), primary_key=True)
+    evidence_span_id: Mapped[str] = mapped_column(ForeignKey("evidence_span.id"), primary_key=True)
+    supports: Mapped[str] = mapped_column(String(15), default="SUPPORTS")
+
+
+class ClaimVerdict(Timestamped, Base):
+    """[append-only]"""
+
+    __tablename__ = "claim_verdict"
+    id: Mapped[str] = _id("cvd")
+    claim_id: Mapped[str] = mapped_column(ForeignKey("claim.id"), index=True)
+    audit_ref: Mapped[str] = mapped_column(String(60), default="")
+    verdict: Mapped[str] = mapped_column(String(25))
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    evidence_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    origin_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+
+
+class Divergence(Timestamped, Base):
+    __tablename__ = "divergence"
+    id: Mapped[str] = _id("dvg")
+    claim_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    cause: Mapped[str] = mapped_column(String(25), default="TRUE_DISAGREEMENT")
+    resolution: Mapped[str] = mapped_column(String(25), default="OPEN")
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class Question(Timestamped, Base):
+    __tablename__ = "question"
+    __table_args__ = (UniqueConstraint("project_id", "content_hash"),)
+    id: Mapped[str] = _id("q")
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id"), index=True)
+    import_batch_id: Mapped[str | None] = mapped_column(ForeignKey("import_batch.id"))
+    exam_board: Mapped[str] = mapped_column(String(200), default="")
+    year: Mapped[int | None] = mapped_column(Integer)
+    institution: Mapped[str] = mapped_column(String(200), default="")
+    exam: Mapped[str] = mapped_column(String(200), default="")
+    number: Mapped[str] = mapped_column(String(40), default="")
+    stem: Mapped[str | None] = mapped_column(Text)
+    options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    key_preliminary: Mapped[str | None] = mapped_column(String(10))
+    key_final: Mapped[str | None] = mapped_column(String(10))
+    annulled: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(500), default="")
+    split: Mapped[str] = mapped_column(String(12), default="PLANNING")  # PLANNING | EVALUATION
+    content_hash: Mapped[str] = mapped_column(String(64))
+
+
+class QuestionRequirement(Base):
+    __tablename__ = "question_requirement"
+    id: Mapped[str] = _id("qr")
+    question_id: Mapped[str] = mapped_column(ForeignKey("question.id"), index=True)
+    objective_id: Mapped[str] = mapped_column(ForeignKey("learning_objective.id"), index=True)
+    step: Mapped[str] = mapped_column(String(12))
+    coverage_state: Mapped[str] = mapped_column(String(25), default="ABSENT")
+
+
+# ------------------------------------------------------------------ importações
+class ImportBatch(Timestamped, Base):
+    __tablename__ = "import_batch"
+    id: Mapped[str] = _id("imp")
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # ANKI_EXPORT | QUESTIONS
+    filename: Mapped[str] = mapped_column(String(500), default="")
+    content_hash: Mapped[str] = mapped_column(String(64))
+    format_detected: Mapped[str] = mapped_column(String(40), default="")
+    report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(100), default="")
