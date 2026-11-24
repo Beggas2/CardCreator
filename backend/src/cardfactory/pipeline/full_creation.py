@@ -17,7 +17,11 @@ from sqlalchemy import select
 
 from cardfactory.db import Database
 from cardfactory.db.models import Card, CardStateEvent, CardVersion, Production
+from cardfactory.knowledge.service import Knowledge
+from cardfactory.library.service import Library
 from cardfactory.orchestrator.engine import AwaitingHuman, TaskContext, TaskSpec
+from cardfactory.pipeline import research as rs
+from cardfactory.pipeline.research import Fetcher, ResearchServices
 from cardfactory.prompts.registry import PromptRegistry
 from cardfactory.providers.base import LLMRequest
 from cardfactory.providers.gateway import LLMGateway
@@ -27,7 +31,7 @@ MODE = "FULL_CREATION"
 # etapa → (papel do prompt, usa IA)
 STAGES: list[tuple[str, str | None]] = [
     ("INVENTORY", None), ("RESEARCH", "researcher"), ("RETRIEVAL", None), ("EXTRACTION", "extractor"),
-    ("PLANNING", "planner"), ("OBJECTIVES", "planner"), ("GENERATION", "creator"),
+    ("PLANNING", "planner"), ("OBJECTIVES", None), ("GENERATION", "creator"),
     ("AUDIT_SCI", "auditor_scientific"), ("AUDIT_PED", "auditor_pedagogical"), ("AUDIT_COV", "auditor_coverage"),
     ("CORRECTION", "creator"), ("REAUDIT", "auditor_scientific"), ("DEDUP", "contradiction"),
     ("TECH_VALIDATION", None), ("HUMAN_REVIEW", None), ("EXPORT", None),
@@ -39,6 +43,7 @@ DEPS: dict[str, list[str]] = {
     "REAUDIT": ["CORRECTION"], "DEDUP": ["REAUDIT"], "TECH_VALIDATION": ["DEDUP"], "HUMAN_REVIEW": ["TECH_VALIDATION"],
     "EXPORT": ["HUMAN_REVIEW"],
 }
+RESEARCH_STAGES = ("RESEARCH", "RETRIEVAL", "EXTRACTION", "PLANNING", "OBJECTIVES")
 CRITICAL = {"AUDIT_SCI", "REAUDIT", "GENERATION", "CORRECTION", "EXTRACTION"}
 
 STAGE_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"},
@@ -62,6 +67,15 @@ class Services:
     registry: PromptRegistry
     models: dict[str, str]  # etapa → model_id (nunca codificado no código: vem da configuração)
     exports_dir: Path
+    library: Library | None = None
+    knowledge: Knowledge | None = None
+    fetcher: Fetcher | None = None
+
+    def research(self) -> ResearchServices:
+        if self.library is None or self.knowledge is None or self.fetcher is None:
+            raise RuntimeError("serviços de pesquisa não configurados")
+        return ResearchServices(self.db, self.gateway, self.registry, self.library, self.knowledge, self.fetcher,
+                                self.models)
 
 
 def _production(db: Database, run_id: str) -> Production:
@@ -92,7 +106,7 @@ def handlers(svc: Services) -> dict[str, Any]:
     out: dict[str, Any] = {}
 
     for stage, role in STAGES:
-        if role is None or stage == "GENERATION":
+        if role is None or stage in ("GENERATION", *RESEARCH_STAGES):
             continue
 
         def make(stage=stage, role=role):
@@ -110,9 +124,6 @@ def handlers(svc: Services) -> dict[str, Any]:
         with svc.db.session() as s:
             n = len(list(s.execute(select(Card.id).where(Card.project_id == prd.project_id)).scalars()))
         return {"phase": 1, "existing_cards": n}
-
-    async def retrieval(ctx: TaskContext) -> dict:
-        return {"phase": 1, "documents": 0, "limitations": ["biblioteca de fontes chega na Fase 2"]}
 
     async def generation(ctx: TaskContext) -> dict:
         prd = _production(svc.db, ctx.run_id)
@@ -165,15 +176,18 @@ def handlers(svc: Services) -> dict[str, Any]:
                                    ensure_ascii=False, indent=2), encoding="utf-8")
         return {"phase": 1, "manifest": str(path), "cards": len(cards)}
 
-    out.update({"fc.inventory": inventory, "fc.retrieval": retrieval, "fc.generation": generation,
+    def research_handler(fn):
+        async def h(ctx: TaskContext) -> dict:
+            return await fn(svc.research(), ctx)
+        return h
+
+    for stage, fn in (("RESEARCH", rs.research), ("RETRIEVAL", rs.retrieval), ("EXTRACTION", rs.extraction),
+                      ("PLANNING", rs.planning), ("OBJECTIVES", rs.objectives)):
+        out[f"fc.{stage.lower()}"] = research_handler(fn)
+
+    out.update({"fc.inventory": inventory, "fc.generation": generation,
                 "fc.tech_validation": tech_validation, "fc.human_review": human_review, "fc.export": export})
     return out
 
 
-def mock_responder(req: LLMRequest) -> dict:
-    """Respostas determinísticas do provedor simulado para o grafo da Fase 1."""
-    if "cards" in ((req.response_schema or {}).get("properties") or {}):
-        return {"limitations": ["conteúdo simulado"],
-                "cards": [{"front": f"[SIMULADO] Pergunta {i + 1}?", "essential": f"[SIMULADO] Resposta {i + 1}"}
-                          for i in range(3)]}
-    return {"ok": True, "limitations": ["resposta simulada"]}
+from cardfactory.pipeline.simulation import mock_responder  # noqa: E402,F401  (reexportado)

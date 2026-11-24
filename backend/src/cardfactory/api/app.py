@@ -32,12 +32,18 @@ from cardfactory.db.models import (
     Task,
 )
 from cardfactory.finance.budget import BudgetError, FinanceService
+from cardfactory.importers.anki import AnkiImporter
+from cardfactory.importers.questions import import_questions
+from cardfactory.knowledge.service import Knowledge, KnowledgeError
+from cardfactory.library.service import Library, LibraryError
 from cardfactory.orchestrator.engine import Orchestrator, OrchestratorError
 from cardfactory.pipeline import full_creation
+from cardfactory.pipeline.simulation import mock_fetcher
 from cardfactory.prompts.registry import PromptError, PromptRegistry
 from cardfactory.providers.base import LLMProvider
 from cardfactory.providers.gateway import LLMGateway
 from cardfactory.providers.mock import MockProvider
+from cardfactory.security.fetch import FetchBlockedError, FetchFailedError, safe_fetch
 from cardfactory.security.secrets import install_log_redaction
 
 log = logging.getLogger(__name__)
@@ -51,6 +57,9 @@ class AppState:
     finance: FinanceService
     registry: PromptRegistry
     providers: dict[str, LLMProvider]
+    library: Library
+    knowledge: Knowledge
+    fetcher: Any = None  # injetável nos testes; padrão: download seguro
     gateways: dict[str, LLMGateway] = field(default_factory=dict)
     running: dict[str, asyncio.Task] = field(default_factory=dict)
 
@@ -60,6 +69,17 @@ class AppState:
         if provider not in self.gateways:
             self.gateways[provider] = LLMGateway(self.db, self.finance, self.providers[provider])
         return self.gateways[provider]
+
+
+async def _safe_fetcher(url: str) -> tuple[bytes, str | None, str]:
+    r = await safe_fetch(url)
+    return r.data, r.content_type, r.final_url
+
+
+def httpx_errors() -> type[Exception]:
+    import httpx
+
+    return httpx.HTTPError
 
 
 def _host_ok(value: str | None) -> bool:
@@ -81,7 +101,7 @@ def create_app(settings: Settings | None = None, providers: dict[str, LLMProvide
         if settings.openrouter_configured:
             from cardfactory.providers.openrouter import OpenRouterProvider
             providers["openrouter"] = OpenRouterProvider()
-    st = AppState(settings, db, finance, registry, providers)
+    st = AppState(settings, db, finance, registry, providers, Library(db, settings.data_dir / "blobs"), Knowledge(db))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -113,6 +133,14 @@ def create_app(settings: Settings | None = None, providers: dict[str, LLMProvide
     @app.exception_handler(OrchestratorError)
     async def orch_err(_r, e: OrchestratorError):
         return JSONResponse({"detail": str(e)}, status_code=409)
+
+    @app.exception_handler(LibraryError)
+    async def lib_err(_r, e: LibraryError):
+        return JSONResponse({"detail": str(e)}, status_code=400)
+
+    @app.exception_handler(KnowledgeError)
+    async def kn_err(_r, e: KnowledgeError):
+        return JSONResponse({"detail": str(e)}, status_code=400)
 
     @app.exception_handler(PromptError)
     async def prompt_err(_r, e: PromptError):
@@ -163,10 +191,55 @@ class ProductionIn(BaseModel):
     provider: str = "mock"
     budget_id: str | None = None
     models: dict[str, str] = {}
+    research_mode: str = "HYBRID"  # AUTONOMOUS | UPLOADED | HYBRID (BIB-001)
+    document_ids: list[str] = []
 
 
 class SkipIn(BaseModel):
     reason: str
+
+
+class SourceIn(BaseModel):
+    title_claimed: str
+    institution: str = ""
+    source_tier: str = "UNCLASSIFIED"
+    doc_type: str = ""
+    url: str | None = None
+    doi: str | None = None
+    created_by: str = "usuário"
+    notes: str = ""
+
+
+class VersionIn(BaseModel):
+    version_label: str = ""
+    published_at: str | None = None
+    page_updated_at: str | None = None
+    effective_from: str | None = None
+    effective_to: str | None = None
+    validity_status: str = "UNCERTAIN"
+    supersedes_version_id: str | None = None
+    population: str = ""
+    context: str = ""
+
+
+class FetchIn(BaseModel):
+    url: str
+
+
+class StateIn(BaseModel):
+    state: str
+    actor: str
+    reason: str = ""
+
+
+class EvidenceIn(BaseModel):
+    section_id: str
+    quote: str
+
+
+class ProjectIn(BaseModel):
+    name: str
+    area: str = ""
 
 
 def _run_row(s, r: Run) -> dict[str, Any]:
@@ -336,8 +409,9 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
 
     # ------------------------------------------------------------ produções e execuções
     def _orchestrator(provider: str, models: dict[str, str]) -> Orchestrator:
-        svc = full_creation.Services(db, st.gateway(provider), registry, models,
-                                     st.settings.data_dir / "exports")
+        fetcher = mock_fetcher if provider == "mock" else (st.fetcher or _safe_fetcher)
+        svc = full_creation.Services(db, st.gateway(provider), registry, models, st.settings.data_dir / "exports",
+                                     st.library, st.knowledge, fetcher)
         return Orchestrator(db, full_creation.handlers(svc))
 
     def _models_for(provider: str, given: dict[str, str]) -> dict[str, str]:
@@ -359,9 +433,13 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
                 prj = Project(name=p.project_name)
                 s.add(prj)
                 s.flush()
+            if p.research_mode not in ("AUTONOMOUS", "UPLOADED", "HYBRID"):
+                raise HTTPException(400, "modo de pesquisa inválido")
+            if p.research_mode == "UPLOADED" and not p.document_ids:
+                raise HTTPException(400, "modo documentos enviados exige ao menos um documento")
             prd = Production(project_id=prj.id, mode=full_creation.MODE, theme=p.theme,
-                             target_cards=p.target_cards, provider=p.provider,
-                             scope={"models": models})
+                             target_cards=p.target_cards, provider=p.provider, research_mode=p.research_mode,
+                             scope={"models": models, "document_ids": p.document_ids})
             s.add(prd)
             s.flush()
             prd_id = prd.id
@@ -455,6 +533,147 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
                 out.append({"id": c.id, "card_key": c.card_key, "state": c.state, "origin": c.origin,
                             "production_id": c.production_id, "version": v.version_no if v else None,
                             "content": v.content if v else None})
+            return out
+
+    # ------------------------------------------------------------ projetos
+    @app.get("/api/projects")
+    def projects():
+        with db.session() as s:
+            return [{"id": p.id, "name": p.name, "area": p.area} for p in
+                    s.execute(select(Project).order_by(Project.name)).scalars()]
+
+    @app.post("/api/projects")
+    def create_project(p: ProjectIn):
+        with db.write() as s:
+            if s.execute(select(Project).where(Project.name == p.name)).scalar_one_or_none():
+                raise HTTPException(409, "já existe um projeto com esse nome")
+            prj = Project(name=p.name, area=p.area)
+            s.add(prj)
+            s.flush()
+            return {"id": prj.id}
+
+    def _project(project_id: str) -> str:
+        with db.session() as s:
+            if s.get(Project, project_id) is None:
+                raise HTTPException(404, "projeto inexistente")
+        return project_id
+
+    # ------------------------------------------------------------ biblioteca
+    lib, kn = st.library, st.knowledge
+
+    @app.get("/api/library/sources")
+    def lib_sources():
+        return lib.list_sources()
+
+    @app.post("/api/library/sources")
+    def lib_add_source(b: SourceIn):
+        return {"id": lib.add_source(**b.model_dump())}
+
+    @app.patch("/api/library/sources/{source_id}")
+    def lib_update_source(source_id: str, fields: dict[str, Any]):
+        lib.update_source(source_id, **fields)
+        return {"ok": True}
+
+    @app.post("/api/library/sources/{source_id}/versions")
+    def lib_add_version(source_id: str, b: VersionIn):
+        return {"id": lib.add_version(source_id, **b.model_dump())}
+
+    @app.post("/api/library/versions/{version_id}/upload")
+    async def lib_upload(version_id: str, request: Request, filename: str = "", actor: str = "usuário"):
+        data = await request.body()
+        if len(data) > 50 * 1024 * 1024:
+            raise HTTPException(413, "arquivo maior que 50 MB")
+        did = lib.register_found(version_id, None, actor=actor)
+        res = lib.ingest(did, data, declared_mime=request.headers.get("content-type"), filename=filename,
+                         origin="USER_UPLOAD", actor=actor)
+        return res.__dict__
+
+    @app.post("/api/library/versions/{version_id}/fetch")
+    async def lib_fetch(version_id: str, b: FetchIn, actor: str = "usuário"):
+        did = lib.register_found(version_id, b.url, actor=actor)
+        try:
+            data, ctype, final = await (st.fetcher or _safe_fetcher)(b.url)
+        except (FetchBlockedError, FetchFailedError, httpx_errors()) as e:
+            lib.mark_unavailable(did, f"{type(e).__name__}: {e}", actor=actor)
+            raise HTTPException(422, f"não foi possível baixar: {e}") from e
+        return lib.ingest(did, data, declared_mime=ctype, fetch_url=final, actor=actor).__dict__
+
+    @app.get("/api/library/documents/{document_id}/sections")
+    def lib_sections(document_id: str):
+        return lib.sections(document_id)
+
+    @app.post("/api/library/documents/{document_id}/state")
+    def lib_state(document_id: str, b: StateIn):
+        lib.set_state(document_id, b.state, b.actor, b.reason)
+        return {"ok": True}
+
+    @app.get("/api/library/search")
+    def lib_search(q: str, institution: str | None = None, tier: str | None = None, validity: str | None = None,
+                   year: str | None = None, limit: int = 20):
+        return lib.search(q, institution=institution, tier=tier, validity=validity, year=year, limit=limit)
+
+    @app.post("/api/library/evidence")
+    def lib_evidence(b: EvidenceIn):
+        eid = lib.add_evidence(b.section_id, b.quote, retrieved_via="USER_UPLOAD")
+        return lib.evidence(eid)
+
+    # ------------------------------------------------------------ importações
+    @app.post("/api/imports/anki")
+    async def imp_anki(request: Request, project_id: str, filename: str = "", author: str = ""):
+        return AnkiImporter(db).import_export(_project(project_id), await request.body(), filename=filename,
+                                              author=author)
+
+    @app.post("/api/imports/questions")
+    async def imp_questions(request: Request, project_id: str, filename: str = "", author: str = "",
+                            evaluation_pct: int = 20):
+        try:
+            return import_questions(db, _project(project_id), await request.body(), filename=filename,
+                                    author=author, evaluation_pct=evaluation_pct)
+        except (ValueError, UnicodeDecodeError) as e:
+            raise HTTPException(400, f"arquivo inválido: {e}") from e
+
+    @app.get("/api/imports")
+    def imports(project_id: str | None = None):
+        from cardfactory.db.models import ImportBatch
+        with db.session() as s:
+            q = select(ImportBatch).order_by(ImportBatch.created_at.desc()).limit(100)
+            if project_id:
+                q = q.where(ImportBatch.project_id == project_id)
+            return [{"id": b.id, "kind": b.kind, "filename": b.filename, "format": b.format_detected,
+                     "created_by": b.created_by, "created_at": b.created_at.isoformat(), "report": b.report}
+                    for b in s.execute(q).scalars()]
+
+    # ------------------------------------------------------------ conhecimento
+    @app.get("/api/knowledge/entities")
+    def kn_entities(project_id: str):
+        return kn.overview(project_id)
+
+    @app.get("/api/knowledge/entities/{entity_id}/map")
+    def kn_map(entity_id: str, origin: str = "CREATOR"):
+        return kn.get_map(entity_id, origin)
+
+    @app.get("/api/knowledge/objectives")
+    def kn_objectives(project_id: str | None = None, production_id: str | None = None):
+        return kn.objectives(project_id=project_id, production_id=production_id)
+
+    @app.get("/api/knowledge/coverage/{production_id}")
+    def kn_coverage(production_id: str):
+        return kn.coverage_report(production_id)
+
+    @app.get("/api/knowledge/claims")
+    def kn_claims(objective_id: str | None = None, limit: int = 200):
+        from cardfactory.db.models import Claim, ClaimEvidence
+        with db.session() as s:
+            q = select(Claim).order_by(Claim.created_at.desc()).limit(min(limit, 1000))
+            if objective_id:
+                q = q.where(Claim.objective_id == objective_id)
+            out = []
+            for c in s.execute(q).scalars():
+                evs = list(s.execute(select(ClaimEvidence.evidence_span_id).where(ClaimEvidence.claim_id == c.id))
+                           .scalars())
+                out.append({"id": c.id, "text": c.text, "component": c.component, "criticality": c.criticality,
+                            "population": c.population, "numeric": c.numeric, "objective_id": c.objective_id,
+                            "evidence": [lib.evidence(e) for e in evs]})
             return out
 
     @app.get("/api/not-implemented/{feature}")

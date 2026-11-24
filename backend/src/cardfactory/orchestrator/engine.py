@@ -43,6 +43,10 @@ class NotImplementedStage(Exception):  # noqa: N818
     """Etapa ou modo declarado mas não implementado: falha explícita, nunca resultado fictício."""
 
 
+class ContractViolation(Exception):  # noqa: N818
+    """Saída de IA válida no schema mas que viola regra do contrato; repetir daria o mesmo resultado."""
+
+
 class OrchestratorError(Exception):
     pass
 
@@ -331,8 +335,8 @@ class Orchestrator:
             return self._finish(task.id, "AWAITING_HUMAN", error=str(e))
         except NotImplementedStage as e:
             return self._finish(task.id, "FAILED", error=str(e), terminal=True)
-        except ModelMismatchError as e:
-            return self._finish(task.id, "FAILED", error=str(e), terminal=True)
+        except (ModelMismatchError, ContractViolation) as e:
+            return self._finish(task.id, "FAILED", error=f"{type(e).__name__}: {e}", terminal=True)
         except CallFailedError as e:
             return self._fail_or_retry(task.id, str(e), retryable=e.retryable, retry_after=e.retry_after_s)
         except Exception as e:  # noqa: BLE001 - toda falha vira estado persistido
