@@ -638,3 +638,62 @@ class ExportRun(Timestamped, Base):
     diff: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[str] = mapped_column(String(100), default="")
+
+
+# ------------------------------------------------------------------ auditoria (Fase 4)
+class Audit(Timestamped, Base):
+    """[append-only] Uma passagem de auditoria sobre um card (ou sobre a produção, quando card_version_id é nulo)."""
+
+    __tablename__ = "audit"
+    id: Mapped[str] = _id("aud")
+    production_id: Mapped[str | None] = mapped_column(ForeignKey("production.id"), index=True)
+    card_version_id: Mapped[str | None] = mapped_column(ForeignKey("card_version.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(25))  # SCIENTIFIC | PEDAGOGICAL | COVERAGE | SECURITY | TECHNICAL | ...
+    llm_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
+    result: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    context_manifest: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # AUD-001: o que o auditor recebeu
+
+
+class Defect(Timestamped, Base):
+    __tablename__ = "defect"
+    id: Mapped[str] = _id("def")
+    card_id: Mapped[str | None] = mapped_column(ForeignKey("card.id"), index=True)
+    production_id: Mapped[str | None] = mapped_column(ForeignKey("production.id"), index=True)
+    audit_id: Mapped[str | None] = mapped_column(ForeignKey("audit.id"))
+    category: Mapped[str] = mapped_column(String(30))
+    severity: Mapped[str] = mapped_column(String(12))
+    description: Mapped[str] = mapped_column(Text)
+    evidence_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="OPEN")  # OPEN | FIXED | JUSTIFIED | ESCALATED
+    correction_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    origin: Mapped[str] = mapped_column(String(20), default="AI")  # AI | DETERMINISTIC | HUMAN
+    resolution_note: Mapped[str] = mapped_column(Text, default="")
+
+
+class SimilarityPair(Timestamped, Base):
+    """Candidatos de duplicação/contradição (DED-002). Nunca geram exclusão automática (DED-003)."""
+
+    __tablename__ = "similarity_pair"
+    __table_args__ = (UniqueConstraint("card_a_id", "card_b_id"),)
+    id: Mapped[str] = _id("sim")
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id"), index=True)
+    card_a_id: Mapped[str] = mapped_column(ForeignKey("card.id"))
+    card_b_id: Mapped[str] = mapped_column(ForeignKey("card.id"))
+    layer: Mapped[str] = mapped_column(String(20))  # HASH | NORMALIZED | LEXICAL | NUMERIC | OBJECTIVE
+    score: Mapped[str] = mapped_column(String(10), default="")
+    kind: Mapped[str | None] = mapped_column(String(30))  # SimilarityKind decidido por IA ou humano
+    proposal: Mapped[str] = mapped_column(String(20), default="REVIEW_REQUIRED")
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(12), default="OPEN")  # OPEN | CLASSIFIED | RESOLVED
+
+
+class ProductionVerdict(Timestamped, Base):
+    """[append-only] Veredito por dimensão, separado para original e corrigido; nunca média (AUD-014)."""
+
+    __tablename__ = "production_verdict"
+    id: Mapped[str] = _id("pv")
+    production_id: Mapped[str] = mapped_column(ForeignKey("production.id"), index=True)
+    target: Mapped[str] = mapped_column(String(10))  # ORIGINAL | CORRECTED
+    dimension: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(20))
+    detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

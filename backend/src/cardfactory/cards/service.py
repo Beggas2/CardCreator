@@ -104,6 +104,34 @@ class CardService:
                             actor_type=author_type, justification=note))
             return {"version_no": v.version_no, "changed": True, "version_id": v.id}
 
+    def convert_legacy(self, card_id: str, model_card: dict[str, Any], *, actor: str, author_type: str = "AI",
+                       call_id: str | None = None, kind: str = "UPDATE_CONTENT", note: str = "",
+                       objective_change: str = "EQUIVALENT") -> dict[str, Any]:
+        """Converte um card legado (HTML importado) em card.v2, no mesmo card: o GUID do Anki é preservado."""
+        with self.db.write() as s:
+            card = self._card(s, card_id)
+            last = self._last(s, card.id)
+            if last.schema_version == "2.1":
+                raise CardServiceError("card já está em card.v2")
+            stored = to_stored(model_card, card_key=card.card_key, anki_guid=card.anki_guid)
+            v = self._add_version(s, card, stored, last.version_no + 1, author_type=author_type, call_id=call_id,
+                                  didactic_order=None, note=note or "conversão de card legado para card.v2",
+                                  objective_change=objective_change)
+            s.add(Operation(card_id=card.id, kind=kind, from_version_id=last.id, to_version_id=v.id, actor=actor,
+                            actor_type=author_type, justification=note or "conversão para card.v2"))
+            return {"version_no": v.version_no, "changed": True, "version_id": v.id}
+
+    def propose(self, card_id: str, kind: str, *, actor: str, actor_type: str, justification: str,
+                related: list[str] | None = None) -> None:
+        """Operação proposta para decisão humana (MOVE, SPLIT, MERGE_REVIEW, REVIEW_DELETE, REVIEW_REQUIRED...)."""
+        if kind not in OPERATIONS:
+            raise CardServiceError(f"operação desconhecida: {kind}")
+        with self.db.write() as s:
+            card = self._card(s, card_id)
+            s.add(Operation(card_id=card.id, kind=kind, actor=actor, actor_type=actor_type, status="AWAITING_HUMAN",
+                            justification=justification, related_card_ids=related or [],
+                            from_version_id=self._last(s, card.id).id))
+
     def rollback(self, card_id: str, to_version_no: int, *, actor: str, reason: str) -> dict[str, Any]:
         if not actor.strip() or not reason.strip():
             raise CardServiceError("rollback exige autor e motivo")

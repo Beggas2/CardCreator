@@ -26,6 +26,11 @@ roles:
     contract: generation_batch.v1
     required: [PRI-001, PRI-003, PRI-005, PRI-007, SEC-002, SCI-006, SCI-013, SCI-015, SCI-018, SCI-020,
                PED-001, PED-004, PED-007, PED-010, VIS-001, VIS-005]
+  corrector:
+    policies: [integrity, scientific, pedagogical, visual]
+    normative: Prompt Revisor.txt
+    contract: correction.v1
+    required: [PRI-001, PRI-005, SEC-002, SCI-006, SCI-013, PED-017, AUD-008, AUD-009, INT-003, VIS-001]
   auditor_scientific:
     policies: [integrity, scientific]
     normative: Prompt Revisor.txt

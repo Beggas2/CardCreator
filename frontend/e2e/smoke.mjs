@@ -1,5 +1,5 @@
 // Smoke test da interface: sobe o backend com dados temporários e provedor simulado,
-// percorre todas as telas: execução simulada até a revisão humana, cards, exportação, galeria, prompts e orçamento.
+// percorre todas as telas: execução simulada até a revisão humana, cards, exportação, auditoria, galeria, prompts e orçamento.
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -96,6 +96,23 @@ try {
   await page.getByText("pronta").first().waitFor();
   await page.getByRole("link", { name: /DECK_anki_tsv_v2_v1\.txt/ }).waitFor();
   await page.screenshot({ path: join(shots, "9-exportacao.png"), fullPage: true });
+
+  // Fase 4: auditoria integral do lote importado (provedor simulado) e relatório por dimensão.
+  await page.getByRole("link", { name: "Auditoria" }).click();
+  await page.getByLabel("Tema").fill("Teste de auditoria");
+  await page.getByLabel(/teste\.txt/).check();
+  await page.getByRole("button", { name: "Iniciar auditoria" }).click();
+  await page.getByRole("combobox", { name: "Produção" }).locator("option", { hasText: "Auditoria · Teste de auditoria" })
+    .waitFor({ state: "attached", timeout: 15000 });
+  await page.getByText("Veredito por dimensão").waitFor();
+  await page.getByText("importado").first().waitFor({ timeout: 30000 });
+  await page.getByRole("cell", { name: /sem defeitos abertos|com pendências|bloqueada|não verificada/ }).first()
+    .waitFor({ timeout: 30000 });
+  await page.screenshot({ path: join(shots, "11-auditoria.png"), fullPage: true });
+  await page.setViewportSize({ width: 412, height: 900 });
+  const pageOver = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (pageOver > 0) throw new Error(`Auditoria rola na horizontal em celular (${pageOver}px)`);
+  await page.setViewportSize({ width: 1280, height: 860 });
 
   await page.setViewportSize({ width: 412, height: 900 });
   await page.getByRole("link", { name: "Galeria visual" }).click();

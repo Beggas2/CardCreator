@@ -1,8 +1,8 @@
 """Grafo do modo "criação integral" (PIPELINE.md).
 
 Reais: pesquisa, leitura, extração, planejamento e objetivos (Fase 2); geração card.v2, validação técnica
-e exportação (Fase 3). Ainda simplificadas: auditorias, correção e deduplicação (Fase 4) — suas saídas
-carregam `phase: 1` para nunca serem confundidas com auditoria real.
+e exportação (Fase 3); auditorias científica, pedagógica, de segurança e de cobertura, correção limitada,
+reauditoria e deduplicação (Fase 4, `pipeline/audit.py`).
 """
 
 from __future__ import annotations
@@ -20,11 +20,11 @@ from cardfactory.export.service import Exporter
 from cardfactory.knowledge.service import Knowledge
 from cardfactory.library.service import Library
 from cardfactory.orchestrator.engine import AwaitingHuman, TaskContext, TaskSpec
+from cardfactory.pipeline import audit as au
 from cardfactory.pipeline import generation as gen
 from cardfactory.pipeline import research as rs
 from cardfactory.pipeline.research import Fetcher, ResearchServices
 from cardfactory.prompts.registry import PromptRegistry
-from cardfactory.providers.base import LLMRequest
 from cardfactory.providers.gateway import LLMGateway
 
 MODE = "FULL_CREATION"
@@ -33,23 +33,20 @@ MODE = "FULL_CREATION"
 STAGES: list[tuple[str, str | None]] = [
     ("INVENTORY", None), ("RESEARCH", "researcher"), ("RETRIEVAL", None), ("EXTRACTION", "extractor"),
     ("PLANNING", "planner"), ("OBJECTIVES", None), ("GENERATION", "creator"),
-    ("AUDIT_SCI", "auditor_scientific"), ("AUDIT_PED", "auditor_pedagogical"), ("AUDIT_COV", "auditor_coverage"),
-    ("CORRECTION", "creator"), ("REAUDIT", "auditor_scientific"), ("DEDUP", "contradiction"),
+    ("AUDIT_SCI", "auditor_scientific"), ("AUDIT_PED", "auditor_pedagogical"), ("AUDIT_SEC", "auditor_security"),
+    ("AUDIT_COV", "auditor_coverage"), ("CORRECTION", "corrector"), ("REAUDIT", "auditor_scientific"),
+    ("DEDUP", "contradiction"),
     ("TECH_VALIDATION", None), ("HUMAN_REVIEW", None), ("EXPORT", None),
 ]
 DEPS: dict[str, list[str]] = {
     "RESEARCH": ["INVENTORY"], "RETRIEVAL": ["RESEARCH"], "EXTRACTION": ["RETRIEVAL"], "PLANNING": ["EXTRACTION"],
     "OBJECTIVES": ["PLANNING"], "GENERATION": ["OBJECTIVES"], "AUDIT_SCI": ["GENERATION"],
-    "AUDIT_PED": ["GENERATION"], "AUDIT_COV": ["GENERATION"], "CORRECTION": ["AUDIT_SCI", "AUDIT_PED", "AUDIT_COV"],
+    "AUDIT_PED": ["GENERATION"], "AUDIT_SEC": ["GENERATION"], "AUDIT_COV": ["GENERATION"],
+    "CORRECTION": ["AUDIT_SCI", "AUDIT_PED", "AUDIT_SEC", "AUDIT_COV"],
     "REAUDIT": ["CORRECTION"], "DEDUP": ["REAUDIT"], "TECH_VALIDATION": ["DEDUP"], "HUMAN_REVIEW": ["TECH_VALIDATION"],
     "EXPORT": ["HUMAN_REVIEW"],
 }
 RESEARCH_STAGES = ("RESEARCH", "RETRIEVAL", "EXTRACTION", "PLANNING", "OBJECTIVES")
-CRITICAL = {"AUDIT_SCI", "REAUDIT", "GENERATION", "CORRECTION", "EXTRACTION"}
-
-STAGE_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"},
-                                                 "limitations": {"type": "array", "items": {"type": "string"}}},
-                "required": ["ok", "limitations"]}
 
 
 def graph(budget_ids: list[str]) -> list[TaskSpec]:
@@ -91,39 +88,23 @@ def _production(db: Database, run_id: str) -> Production:
         return s.get(Production, run.production_id)
 
 
-async def _ai_stage(svc: Services, ctx: TaskContext, role: str, schema: dict, user: str) -> tuple[Any, str]:
-    composed = svc.registry.compose(role)
-    model = svc.models.get(ctx.stage) or svc.models.get("default")
-    if not model:
-        raise ValueError(f"nenhum modelo configurado para a etapa {ctx.stage}")
-    req = LLMRequest(model_id=model, messages=[{"role": "system", "content": composed.text},
-                                               {"role": "user", "content": user}],
-                     max_output_tokens=2000, idempotency_key=ctx.call_key(ctx.stage.lower()),
-                     response_schema=schema, schema_name=composed.contract.replace(".", "_"))
-    r = await svc.gateway.call(req, budget_ids=ctx.input["budget_ids"], task_id=ctx.task_id, stage=ctx.stage,
-                               prompt_version_ids=composed.version_ids, prompt_hash=composed.hash,
-                               critical=ctx.stage in CRITICAL)
-    if r.status != "ok":
-        raise RuntimeError(f"saída {r.status} na etapa {ctx.stage}")
-    return r.parsed, r.call_id
-
-
 def handlers(svc: Services) -> dict[str, Any]:
     out: dict[str, Any] = {}
 
-    for stage, role in STAGES:
-        if role is None or stage in ("GENERATION", *RESEARCH_STAGES):
-            continue
+    def research_only(fn):
+        async def h(ctx: TaskContext) -> dict:
+            return await fn(svc.research(), ctx)
+        return h
 
-        def make(stage=stage, role=role):
-            async def h(ctx: TaskContext) -> dict:
-                prd = _production(svc.db, ctx.run_id)
-                parsed, call_id = await _ai_stage(svc, ctx, role, STAGE_SCHEMA,
-                                                  f"Etapa {stage} para o tema: {prd.theme}")
-                return {"phase": 1, "call_id": call_id, "limitations": parsed.get("limitations", [])}
-            return h
+    def with_cards(fn):
+        async def h(ctx: TaskContext) -> dict:
+            return await fn(svc.research(), ctx, svc.cards())
+        return h
 
-        out[f"fc.{stage.lower()}"] = make()
+    out.update({"fc.audit_sci": research_only(au.audit_scientific), "fc.audit_sec": research_only(au.audit_security),
+                "fc.audit_cov": research_only(au.audit_coverage), "fc.audit_ped": with_cards(au.audit_pedagogical),
+                "fc.correction": with_cards(au.correction), "fc.reaudit": with_cards(au.reaudit),
+                "fc.dedup": with_cards(au.deduplicate)})
 
     async def inventory(ctx: TaskContext) -> dict:
         prd = _production(svc.db, ctx.run_id)

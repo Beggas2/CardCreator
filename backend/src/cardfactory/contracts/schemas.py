@@ -168,7 +168,86 @@ GENERATION_BATCH_V1 = obj({
     "limitations": LIMITATIONS,
 })
 
+# ------------------------------------------------------------------ auditoria (Fase 4)
+DEFECT_CATEGORIES = ("SCIENTIFIC_ERROR", "OUTDATED", "UNRESOLVED_UNCERTAINTY", "IMPRECISION", "AMBIGUITY", "GAP",
+                     "OMITTED_CONTRAINDICATION", "NUMERIC_ERROR", "PHARMACOLOGY_ERROR", "UNIDENTIFIED_DIVERGENCE",
+                     "PEDAGOGICAL", "GRANULARITY", "REDUNDANCY", "CONTRADICTION", "ALLOCATION", "VISUAL", "TECHNICAL",
+                     "REGRESSION", "TRACEABILITY")  # R§36.1 (19)
+SEVERITIES = ("CRITICAL", "HIGH", "MEDIUM", "LOW", "OBSERVATION")
+PED_DIMENSIONS = ("clarity", "independence", "retrieval", "self_assessment", "granularity", "cognitive_load",
+                  "redundancy", "causality", "discrimination", "transfer", "application", "cognitive_type", "front",
+                  "essential", "complements", "visual", "ergonomics")  # PED-016 (17)
+OPERATIONS = ("KEEP", "UPDATE_CONTENT", "UPDATE_FRONT", "UPDATE_PEDAGOGY", "UPDATE_STYLE", "MOVE", "CREATE", "SPLIT",
+              "MERGE_REVIEW", "REVIEW_DELETE", "QUARANTINE", "REVIEW_REQUIRED")  # R§37
+SIMILARITY_KINDS = ("USEFUL_REDUNDANCY", "UNNECESSARY_REDUNDANCY", "INTEGRATION", "CONTRADICTION",
+                    "LEGITIMATE_DIVERGENCE", "NEW_CONTEXT_APPLICATION", "CONTRAST", "UNRELATED")  # DED-001
+VERDICT_VALUES = ("CONFIRMED", "INCORRECT", "OUTDATED", "INCOMPLETE", "AMBIGUOUS", "CONTEXT_DEPENDENT", "DIVERGENT",
+                  "NOT_VERIFIED", "NOT_APPLICABLE")
+
+DEFECT = obj({"card_ref": STR, "category": enum(DEFECT_CATEGORIES), "severity": enum(SEVERITIES),
+              "description": STR, "evidence_span_ids": arr(STR)})
+
+SCI_AUDIT_V1 = obj({
+    "claims": arr(obj({"card_ref": STR, "claim_ref": STR, "text": STR, "component": enum(CLAIM_COMPONENTS),
+                       "criticality": enum(CRITICALITY), "verdict": enum(VERDICT_VALUES),
+                       "evidence_span_ids": arr(STR), "rationale": STR, "needs_more_evidence": {"type": "boolean"}})),
+    "defects": arr(DEFECT),
+    "research_requests": arr(obj({"card_ref": STR, "question": STR})),
+    "limitations": LIMITATIONS,
+})
+PED_AUDIT_V1 = obj({
+    "cards": arr(obj({
+        "card_ref": STR,
+        "findings": arr(obj({"dimension": enum(PED_DIMENSIONS),
+                             "status": enum(("ADEQUATE", "PROBLEM", "NOT_APPLICABLE")), "note": STR}),
+                        minItems=17, maxItems=17),
+        "operation": enum(OPERATIONS),
+        "justification": STR,
+    })),
+    "defects": arr(DEFECT),
+    "limitations": LIMITATIONS,
+})
+SEC_AUDIT_V1 = obj({
+    "risks": arr(DEFECT),
+    "injection_signals": arr(obj({"source_ref": STR, "excerpt": STR})),
+    "third_party_content": arr(obj({"card_ref": STR, "note": STR})),
+    "personal_data": arr(obj({"card_ref": STR, "note": STR})),
+    "limitations": LIMITATIONS,
+})
+COV_AUDIT_V1 = obj({
+    "entities": arr(obj({
+        "name": STR,
+        "dimensions": arr(obj({"code": {"type": "integer", "minimum": 1, "maximum": 57}, "state": enum(MAP_STATES),
+                               "justification": STR}), minItems=57, maxItems=57),
+    })),
+    "objectives": arr(obj({"objective_ref": STR, "coverage_state": enum(COVERAGE_STATES), "card_refs": arr(STR),
+                           "note": STR})),
+    "gaps": arr(obj({"description": STR, "necessity": enum(NECESSITY), "dimension_code": {"type": ["integer", "null"]},
+                     "suggested_card": STR})),
+    "self_sufficiency": arr(obj({"question": STR, "answer": enum(("YES", "PARTIAL", "NO", "NOT_VERIFIABLE")),
+                                 "note": STR})),
+    "limitations": LIMITATIONS,
+})
+CONTRADICTION_V1 = obj({
+    "pairs": arr(obj({"pair_ref": STR, "kind": enum(SIMILARITY_KINDS), "population_a": STR, "population_b": STR,
+                      "scenario_a": STR, "scenario_b": STR, "rationale": STR,
+                      "proposal": enum(("KEEP", "MERGE_REVIEW", "REVIEW_DELETE", "REVIEW_REQUIRED"))})),
+    "limitations": LIMITATIONS,
+})
+CORRECTION_V1 = obj({
+    "corrections": arr(obj({"card_ref": STR, "operation": enum(OPERATIONS), "defect_ids": arr(STR),
+                            "justification": STR, "objective_change": enum(("EQUIVALENT", "SUBSTANTIAL")),
+                            "card": {"anyOf": [CARD_V2_MODEL, {"type": "null"}]}})),
+    "limitations": LIMITATIONS,
+})
+
 CONTRACTS: dict[str, dict[str, Any]] = {
+    "sci_audit.v1": SCI_AUDIT_V1,
+    "ped_audit.v1": PED_AUDIT_V1,
+    "sec_audit.v1": SEC_AUDIT_V1,
+    "cov_audit.v1": COV_AUDIT_V1,
+    "contradiction.v1": CONTRADICTION_V1,
+    "correction.v1": CORRECTION_V1,
     "research_result.v1": RESEARCH_RESULT_V1,
     "extraction.v1": EXTRACTION_V1,
     "plan.v1": PLAN_V1,

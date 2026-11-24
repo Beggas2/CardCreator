@@ -40,6 +40,9 @@ def _props(req: LLMRequest) -> set[str]:
 def mock_responder(req: LLMRequest) -> dict[str, Any]:
     props = _props(req)
     user = req.messages[-1]["content"] if req.messages else ""
+    audit = AUDIT_MOCKS.get(req.schema_name or "")
+    if audit is not None:
+        return audit(user)
     if "candidates" in props:
         return {"searches": ["[SIMULADO] busca"], "candidates": [{
             "title_claimed": "[SIMULADO] Documento de teste", "institution": "CardFactory (simulação)",
@@ -117,3 +120,108 @@ def _mock_cards(user: str) -> dict[str, Any]:
                                               "population": "adultos" if numeric else ""}],
             "evidence_span_ids": spans.get(cid, [])[:1], "media_requests": [], "limitations": ["conteúdo simulado"]})
     return {"cards": cards, "unverified_claims": [], "limitations": ["resposta simulada"]}
+
+
+# ---------------------------------------------------------------------------- auditorias simuladas (Fase 4)
+CARD_HDR_RE = re.compile(r"^### card (\S+)$", re.M)
+AUD_CLAIM_RE = re.compile(r"^- (clm_\w+) \| (\w+) \| (\w+) \| população: ", re.M)
+CURRENT_RE = re.compile(r"^Conteúdo atual \(card\.v2\):\n(\{.*\})$", re.M)
+DEFECT_ID_RE = re.compile(r"^  - (def_\w+) \| ", re.M)
+POOL_RE = re.compile(r'<untrusted_document id="(ev_\w+)">\n\[trecho da fonte\]')
+PAIR_RE = re.compile(r"^### par (\S+) ", re.M)
+COV_OBJ_RE = re.compile(r"^- (obj_\w+) \| (\w+) \| ", re.M)
+FIXED_MARK = "[corrigido]"
+SYSTEM_FIELDS = ("schema_version", "card_key", "anki_guid", "images", "validation_status")
+
+
+def _sections(user: str) -> list[tuple[str, str]]:
+    """(card_key, texto do bloco) para cada "### card" do pedido."""
+    heads = list(CARD_HDR_RE.finditer(user))
+    return [(m.group(1), user[m.end():heads[i + 1].start() if i + 1 < len(heads) else len(user)])
+            for i, m in enumerate(heads)]
+
+
+def _mock_sci(user: str) -> dict[str, Any]:
+    """Confirma cada afirmação citada com as evidências recebidas. O primeiro card ainda sem a marca de correção
+    recebe um defeito MEDIUM de imprecisão, para exercitar correção → reauditoria → FIXED sem custo."""
+    claims, defects = [], []
+    for key, body in _sections(user):
+        spans: dict[str, list[str]] = {}
+        for sid, cid in GEN_SPAN_RE.findall(body):
+            spans.setdefault(cid, []).append(sid)
+        pool = POOL_RE.findall(body)
+        if pool and not AUD_CLAIM_RE.findall(body):  # deck importado: afirmação nova sustentada pelo acervo
+            claims.append({"card_ref": key, "claim_ref": "novo:1", "text": "[SIMULADO] afirmação extraída do card",
+                           "component": "OTHER", "criticality": "NORMAL", "verdict": "CONFIRMED",
+                           "evidence_span_ids": pool[:1], "rationale": "[SIMULADO] trecho do acervo",
+                           "needs_more_evidence": False})
+        for cid, comp, crit in AUD_CLAIM_RE.findall(body):
+            ev = spans.get(cid, [])
+            claims.append({"card_ref": key, "claim_ref": cid, "text": "[SIMULADO]", "component": comp,
+                           "criticality": crit, "verdict": "CONFIRMED" if ev else "NOT_VERIFIED",
+                           "evidence_span_ids": ev, "rationale": "[SIMULADO] verificação de teste",
+                           "needs_more_evidence": not ev})
+        if not defects and FIXED_MARK not in body and "[SIMULADO]" in body:
+            defects.append({"card_ref": key, "category": "IMPRECISION", "severity": "MEDIUM",
+                            "description": "[SIMULADO] complemento impreciso (defeito de teste)",
+                            "evidence_span_ids": []})
+    return {"claims": claims, "defects": defects, "research_requests": [], "limitations": ["resposta simulada"]}
+
+
+def _mock_ped(user: str) -> dict[str, Any]:
+    from cardfactory.contracts.schemas import PED_DIMENSIONS
+    return {"cards": [{"card_ref": key, "findings": [{"dimension": d, "status": "ADEQUATE", "note": ""}
+                                                     for d in PED_DIMENSIONS],
+                       "operation": "KEEP", "justification": "[SIMULADO] sem problema pedagógico"}
+                      for key, _ in _sections(user)],
+            "defects": [], "limitations": ["resposta simulada"]}
+
+
+def _mock_sec(user: str) -> dict[str, Any]:
+    return {"risks": [], "injection_signals": [], "third_party_content": [], "personal_data": [],
+            "limitations": ["resposta simulada"]}
+
+
+def _mock_cov(user: str) -> dict[str, Any]:
+    dims = [{"code": c, "state": "APPLICABLE_PENDING" if c in (1, 29) else "NOT_APPLICABLE",
+             "justification": "" if c in (1, 29) else "[SIMULADO] fora do escopo do teste"} for c in DIMENSIONS]
+    return {"entities": [{"name": "[SIMULADO] Condição X", "dimensions": dims}],
+            "objectives": [{"objective_ref": oid, "coverage_state": "COMPLETE", "card_refs": [], "note": "[SIMULADO]"}
+                           for oid, _ in COV_OBJ_RE.findall(user)],
+            "gaps": [], "self_sufficiency": [{"question": "[SIMULADO] O deck basta para o objetivo?",
+                                              "answer": "NOT_VERIFIABLE", "note": "simulação"}],
+            "limitations": ["resposta simulada"]}
+
+
+def _mock_correction(user: str) -> dict[str, Any]:
+    """Acrescenta a marca de correção ao primeiro complemento do card e devolve card.v2 válido."""
+    import json
+    out = []
+    for key, body in _sections(user):
+        m = CURRENT_RE.search(body)
+        ids = DEFECT_ID_RE.findall(body)
+        if not m:
+            out.append({"card_ref": key, "operation": "REVIEW_REQUIRED", "defect_ids": ids,
+                        "justification": "[SIMULADO] card legado: conversão exige humano", "objective_change":
+                        "EQUIVALENT", "card": None})
+            continue
+        card = {k: v for k, v in json.loads(m.group(1)).items() if k not in SYSTEM_FIELDS}
+        card.setdefault("limitations", [])
+        for b in card["answer"]:
+            if b["role"] == "complement" and b["items"] and b["items"][0]["segments"]:
+                b["items"][0]["segments"][-1]["text"] += f" {FIXED_MARK}"
+                break
+        out.append({"card_ref": key, "operation": "UPDATE_CONTENT", "defect_ids": ids,
+                    "justification": "[SIMULADO] correção mínima de teste", "objective_change": "EQUIVALENT",
+                    "card": card})
+    return {"corrections": out, "limitations": ["resposta simulada"]}
+
+
+def _mock_contradiction(user: str) -> dict[str, Any]:
+    return {"pairs": [{"pair_ref": pid, "kind": "UNRELATED", "population_a": "", "population_b": "", "scenario_a": "",
+                       "scenario_b": "", "rationale": "[SIMULADO] sem relação", "proposal": "KEEP"}
+                      for pid in PAIR_RE.findall(user)], "limitations": ["resposta simulada"]}
+
+
+AUDIT_MOCKS = {"sci_audit_v1": _mock_sci, "ped_audit_v1": _mock_ped, "sec_audit_v1": _mock_sec,
+               "cov_audit_v1": _mock_cov, "correction_v1": _mock_correction, "contradiction_v1": _mock_contradiction}

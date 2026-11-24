@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
+from cardfactory.audit.service import AuditError, AuditService
 from cardfactory.cards.model import CardError, structural_errors
 from cardfactory.cards.samples import SAMPLES
 from cardfactory.cards.service import CardService, CardServiceError
@@ -41,7 +42,7 @@ from cardfactory.importers.questions import import_questions
 from cardfactory.knowledge.service import Knowledge, KnowledgeError
 from cardfactory.library.service import Library, LibraryError
 from cardfactory.orchestrator.engine import Orchestrator, OrchestratorError
-from cardfactory.pipeline import full_creation
+from cardfactory.pipeline import full_audit, full_creation
 from cardfactory.pipeline.simulation import mock_fetcher
 from cardfactory.prompts.registry import PromptError, PromptRegistry
 from cardfactory.providers.base import LLMProvider
@@ -207,6 +208,9 @@ class AuthorIn(BaseModel):
     new_key: str | None = None
 
 
+MODES = {full_creation.MODE: full_creation, full_audit.MODE: full_audit}
+
+
 class ProductionIn(BaseModel):
     project_name: str = "Projeto de demonstração"
     theme: str
@@ -216,6 +220,17 @@ class ProductionIn(BaseModel):
     models: dict[str, str] = {}
     research_mode: str = "HYBRID"  # AUTONOMOUS | UPLOADED | HYBRID (BIB-001)
     document_ids: list[str] = []
+    mode: str = "FULL_CREATION"  # FULL_CREATION | FULL_AUDIT
+    # Escopo da auditoria integral (FULL_AUDIT): cards escolhidos por id, lote de importação e/ou deck.
+    card_ids: list[str] = []
+    import_batch_ids: list[str] = []
+    deck_prefix: str = ""
+
+
+class DefectStatusIn(BaseModel):
+    status: str
+    note: str
+    actor: str
 
 
 class SkipIn(BaseModel):
@@ -484,7 +499,7 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
         svc = full_creation.Services(db, st.gateway(provider), registry, models, st.settings.exports_dir,
                                      st.library, st.knowledge, fetcher, st.settings.media_dir,
                                      st.settings.deck_prefix)
-        return Orchestrator(db, full_creation.handlers(svc))
+        return Orchestrator(db, full_audit.handlers(svc))  # superconjunto: criação e auditoria integrais
 
     def _models_for(provider: str, given: dict[str, str]) -> dict[str, str]:
         if given:
@@ -509,9 +524,15 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
                 raise HTTPException(400, "modo de pesquisa inválido")
             if p.research_mode == "UPLOADED" and not p.document_ids:
                 raise HTTPException(400, "modo documentos enviados exige ao menos um documento")
-            prd = Production(project_id=prj.id, mode=full_creation.MODE, theme=p.theme,
+            if p.mode not in MODES:
+                raise HTTPException(400, f"modo desconhecido: {p.mode}")
+            scope = {"models": models, "document_ids": p.document_ids}
+            if p.mode == full_audit.MODE:
+                scope |= {"card_ids": p.card_ids, "import_batch_ids": p.import_batch_ids,
+                          "deck_prefix": p.deck_prefix}
+            prd = Production(project_id=prj.id, mode=p.mode, theme=p.theme,
                              target_cards=p.target_cards, provider=p.provider, research_mode=p.research_mode,
-                             scope={"models": models, "document_ids": p.document_ids})
+                             scope=scope)
             s.add(prd)
             s.flush()
             prd_id = prd.id
@@ -524,7 +545,7 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
                     .scalar_one_or_none()
             budget_id = b.id if b else finance.create_budget("PROJECT", "mock", "0", "Simulações (sem custo)")
         orch = _orchestrator(p.provider, models)
-        run_id = orch.create_run(prd_id, full_creation.MODE, full_creation.graph([budget_id]))
+        run_id = orch.create_run(prd_id, p.mode, MODES[p.mode].graph([budget_id]))
         return {"production_id": prd_id, "run_id": run_id}
 
     def _launch(run_id: str) -> None:
@@ -602,6 +623,60 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
     @app.get("/api/cards/{card_id}")
     def card_get(card_id: str):
         return cs.get(card_id)
+
+    # ------------------------------------------------------------ auditoria (Fase 4)
+    aud = AuditService(db)
+
+    @app.get("/api/productions")
+    def productions(project_id: str | None = None):
+        with db.session() as s:
+            q = select(Production).order_by(Production.created_at.desc()).limit(200)
+            if project_id:
+                q = q.where(Production.project_id == project_id)
+            return [{"id": p.id, "project_id": p.project_id, "mode": p.mode, "theme": p.theme,
+                     "provider": p.provider, "created_at": p.created_at.isoformat()} for p in s.execute(q).scalars()]
+
+    @app.get("/api/productions/{production_id}/audit-report")
+    def audit_report(production_id: str):
+        with db.session() as s:
+            if s.get(Production, production_id) is None:
+                raise HTTPException(404, "produção inexistente")
+        return aud.report(production_id)
+
+    @app.get("/api/defects")
+    def defects(production_id: str | None = None, card_id: str | None = None, status: str | None = None):
+        return aud.defects(production_id=production_id, card_id=card_id, status=status)
+
+    @app.post("/api/defects/{defect_id}/status")
+    def defect_status(defect_id: str, b: DefectStatusIn):
+        try:
+            aud.set_defect(defect_id, b.status, note=b.note, actor=b.actor)
+        except AuditError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
+
+    @app.get("/api/cards/{card_id}/claims")
+    def card_claims(card_id: str):
+        return aud.claim_verdicts(card_id)
+
+    @app.get("/api/cards/{card_id}/blockers")
+    def card_blockers(card_id: str):
+        return {"blockers": aud.blockers(card_id)}
+
+    @app.get("/api/similarity")
+    def similarity(project_id: str | None = None, status: str | None = None):
+        from cardfactory.db.models import SimilarityPair
+        with db.session() as s:
+            q = select(SimilarityPair).order_by(SimilarityPair.created_at.desc()).limit(500)
+            if project_id:
+                q = q.where(SimilarityPair.project_id == project_id)
+            if status:
+                q = q.where(SimilarityPair.status == status)
+            keys = dict(s.execute(select(Card.id, Card.card_key)).all())
+            return [{"id": p.id, "card_a": keys.get(p.card_a_id), "card_b": keys.get(p.card_b_id),
+                     "card_a_id": p.card_a_id, "card_b_id": p.card_b_id, "layer": p.layer, "score": p.score,
+                     "kind": p.kind, "proposal": p.proposal, "rationale": p.rationale, "status": p.status}
+                    for p in s.execute(q).scalars()]
 
     @app.post("/api/cards")
     def card_create(body: CardIn):

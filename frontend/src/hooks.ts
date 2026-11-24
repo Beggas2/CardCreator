@@ -13,6 +13,7 @@ export function usePoll<T>(url: string | null, intervalMs = 0) {
       setError((e as Error).message);
     }
   }, [url]);
+  useEffect(() => setData(null), [url]); // dados de outra URL nunca aparecem como se fossem desta
   useEffect(() => {
     reload();
     if (!intervalMs) return;

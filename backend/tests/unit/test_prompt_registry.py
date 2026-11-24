@@ -18,8 +18,8 @@ def reg(db) -> PromptRegistry:
 
 
 def test_import_is_idempotent(reg):
-    assert reg.import_library() == {"created": 0, "unchanged": 16}
-    assert len(reg.list_prompts()) == 16
+    assert reg.import_library() == {"created": 0, "unchanged": 17}
+    assert len(reg.list_prompts()) == 17
 
 
 def test_prompt_rule_coverage(reg):
@@ -51,7 +51,7 @@ def test_edit_creates_new_version_and_old_is_immutable(reg, db):
     assert vid in after.version_ids and after.hash != before.hash
     with db.session() as s:
         n = len(list(s.execute(select(PromptVersion)).scalars()))
-    assert n == 17
+    assert n == 18
     # Mesmo conteúdo não cria versão.
     assert reg.edit("role:creator", "# novo\n<!-- req: PED-001 -->\nTexto.\n", author="tassiane") == vid
     # Uma edição que remove regras obrigatórias é acusada pela cobertura.

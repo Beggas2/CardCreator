@@ -1,5 +1,28 @@
 # STATUS
 
+## Fase 4 — concluída (24/11/2026)
+
+- **Implementado**:
+  - Contratos estritos dos auditores: científico (veredito por afirmação com trechos), pedagógico (17 dimensões, KEEP como padrão), segurança (riscos, injeção, terceiros, dados pessoais), cobertura (mapa independente de 57 dimensões, objetivos, lacunas, 28 perguntas de autossuficiência), contradição e correção (papel `corrector` novo).
+  - Defeitos com 19 categorias e 5 gravidades; varreduras determinísticas (frente dependente de contexto, sigla ambígua, redundância interna, soma de escore, aritmética de dose por peso, número diferente da afirmação verificada).
+  - Isolamento do auditor (AUD-001): o card vai sem `validation_status` nem `limitations` do criador, sem auditorias anteriores; o contexto entregue fica registrado em `audit.context_manifest`.
+  - Correção limitada: no máximo 2 tentativas automáticas por defeito, depois ESCALATED ao humano; card legado é convertido para card.v2 no mesmo card (GUID preservado); mudança substancial de objetivo gera proposta REVIEW_REQUIRED (INT-003).
+  - Reauditoria só das versões novas: o defeito que não reaparece vira FIXED; afirmação que era CONFIRMADA e piorou vira defeito REGRESSION.
+  - Deduplicação em camadas (texto normalizado, léxica, numérica, objetivo) classificada por IA; contradição vira defeito HIGH nos dois cards; exclusão e fusão são só propostas (DED-003).
+  - Veredito por dimensão (científica, pedagógica, cobertura, técnica) do ORIGINAL e do CORRIGIDO, nunca média; a científica fica "não verificada" quando nenhum card tem afirmação com veredito.
+  - Portão de liberação não compensatório no exportador: quarentena, defeito crítico/alto aberto, afirmação crítica sem CONFIRMADA, erro técnico ou contradição aberta bloqueiam, mesmo com aprovação humana. Defeito crítico não pode ser justificado. Na prévia o card sai e o bloqueio vai para o manifesto.
+  - Modo FULL_AUDIT para decks existentes: inventário vincula os cards (por lote de importação, ids ou deck), pesquisa e extração montam o acervo, e cada card sem afirmações recebe os trechos mais próximos do acervo. Quarentena da importação nunca é retirada pela auditoria.
+  - Relatório de auditoria (estados, defeitos, vereditos, operações, magnitude com alerta >30% só para deck existente, reconciliação do estado final) e tela Auditoria.
+  - Cards de referência da proprietária (40) guardados em `benchmarks/reference/` byte a byte.
+- **Efetivamente testado**: 227 testes pytest sem rede (mais 1 opcional) e smoke Playwright incluindo a tela Auditoria em 412 px. A criação integral simulada percorre auditoria → correção → reauditoria (defeito de teste corrigido e marcado FIXED). Os 40 cards de referência foram importados e varridos: 1 achado determinístico (sigla PCR sem definição no card de Kawasaki incompleto, gravidade baixa).
+- **Limitações**:
+  - Todas as auditorias de IA rodaram só com o simulado. A auditoria real dos 40 cards de referência precisa de autorização de gasto.
+  - Os 40 cards de referência entram com GUID vazio, então a importação os coloca em quarentena (regra de preservação de GUID); isso não afeta a auditoria nem o benchmark.
+  - Seleção do acervo para decks importados é lexical (sem embeddings).
+  - Propostas (fusão, exclusão, mover, dividir) ficam registradas; a decisão humana sobre elas é da mesa de revisão (Fase 5).
+- **Custos**: R$ 0,00.
+- **Próxima etapa**: Fase 5, mesa de revisão humana, benchmark com os cards de referência e comparador cego.
+
 ## Fase 3 — concluída (24/11/2026)
 
 - **Implementado**:
@@ -16,8 +39,8 @@
 - **Limitações**:
   - Cards reais dependem do modelo; até agora só o simulado gerou cards (conteúdo [SIMULADO]).
   - A aprovação na tela Cards é mínima; a mesa de revisão com motivos tipificados é da Fase 5.
-  - Cards legados importados ainda não têm conversor para card.v2 (Fase 4).
-  - Auditorias científica, pedagógica e de cobertura continuam simplificadas até a Fase 4.
+  - Cards legados importados ainda não tinham conversor para card.v2 (feito na Fase 4).
+  - Auditorias científica, pedagógica e de cobertura eram simplificadas (feitas na Fase 4).
 - **Custos**: R$ 0,00.
 - **Próxima etapa**: Fase 4, auditoria (científica, pedagógica, cobertura, segurança), correção e deduplicação.
 

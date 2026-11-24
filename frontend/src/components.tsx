@@ -7,7 +7,8 @@ const STATE_TONE: Record<string, string> = {
   PAUSED: "warn", PAUSED_BUDGET: "warn", AWAITING_HUMAN: "warn", TRUNCATED: "warn", INVALID_OUTPUT: "warn",
   VERIFIED: "ok", RETRIEVED: "info", FOUND: "muted", PARTIALLY_READ: "warn", UNAVAILABLE: "bad", OUTDATED: "bad",
   VALIDITY_UNCERTAIN: "warn", IMPORTED: "info", QUARANTINE: "bad", HUMAN_APPROVED: "ok", PENDING_HUMAN: "warn",
-  REJECTED: "bad", OBTAINED: "ok",
+  REJECTED: "bad", OBTAINED: "ok", OPEN: "warn", FIXED: "ok", JUSTIFIED: "info", ESCALATED: "bad",
+  AUTO_APPROVED: "info", CORRECTED: "info", IN_AUDIT: "info",
   FAILED: "bad", FAILED_BILLED: "bad", CANCELLED: "muted", UNCERTAIN: "bad", FAILED_UNBILLED: "muted",
 };
 
@@ -18,7 +19,8 @@ const STATE_LABEL: Record<string, string> = {
   PARTIALLY_READ: "lido em parte", UNAVAILABLE: "indisponível", OUTDATED: "desatualizado",
   VALIDITY_UNCERTAIN: "vigência incerta", IMPORTED: "importado", QUARANTINE: "quarentena",
   HUMAN_APPROVED: "aprovado", PENDING_HUMAN: "aguarda revisão", REJECTED: "rejeitado", DRAFT: "rascunho",
-  GENERATED: "gerado", OBTAINED: "obtida", FAILED: "falhou", CANCELLED: "cancelada", UNCERTAIN: "incerta",
+  GENERATED: "gerado", OBTAINED: "obtida", OPEN: "aberto", FIXED: "corrigido", JUSTIFIED: "justificado",
+  ESCALATED: "escalado ao humano", AUTO_APPROVED: "aprovado automático", CORRECTED: "corrigido", IN_AUDIT: "em auditoria", FAILED: "falhou", CANCELLED: "cancelada", UNCERTAIN: "incerta",
 };
 
 export function Badge({ state }: { state: string }) {

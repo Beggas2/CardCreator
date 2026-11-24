@@ -4,3 +4,5 @@
 # Documentos normativos: preservar bytes exatos (CRLF original). Deve vir depois da regra geral.
 docs/normative/** -text
 requirements/requirements.csv -text
+# Cards de referência da proprietária: preservar bytes exatos.
+benchmarks/reference/** -text

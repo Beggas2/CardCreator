@@ -17,6 +17,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from cardfactory.audit.service import AuditService
 from cardfactory.db import Database
 from cardfactory.db.models import (
     Card,
@@ -195,6 +196,12 @@ class Exporter:
                         ValidationFinding.status == "OPEN")).scalars().all()
                     if errs:
                         why, blocking = "erros de validação abertos: " + "; ".join(errs[:3]), True
+                gate: list[str] = []
+                if not why:
+                    # APR-002/APR-003: portão não compensatório. Na prévia o card sai, mas o bloqueio vai ao manifesto.
+                    gate = AuditService(self.db).blockers(card.id, include_human=False)
+                    if gate and not preview:
+                        why, blocking = "portão de liberação: " + "; ".join(gate), True
                 if why:
                     skipped.append({"card_key": card.card_key, "card_id": card.id, "reason": why,
                                     "blocking": blocking})
@@ -204,7 +211,7 @@ class Exporter:
                 note = Note(card.card_key, card.anki_guid or "", card.notetype, v.deck_path, r.front, r.back, tags)
                 meta = {"card_key": card.card_key, "card_id": card.id, "version_no": v.version_no,
                         "images": [im["file"] for im in v.content.get("images", [])],
-                        "source_ids": (v.content.get("short_reference") or {}).get("source_ids", [])}
+                        "source_ids": (v.content.get("short_reference") or {}).get("source_ids", []), "gate": gate}
                 selected.append((note, meta))
         return selected, skipped
 
@@ -213,6 +220,7 @@ class Exporter:
         ids = [m["card_id"] for _, m in selected]
         with self.db.session() as s:
             for _, meta in selected:
+                out += [{"card_key": meta["card_key"], "kind": "BLOQUEIO", "detail": g} for g in meta.get("gate", [])]
                 v = s.execute(select(CardVersion).where(CardVersion.card_id == meta["card_id"])
                               .order_by(CardVersion.version_no.desc()).limit(1)).scalar_one()
                 for f in s.execute(select(ValidationFinding).where(ValidationFinding.card_version_id == v.id,

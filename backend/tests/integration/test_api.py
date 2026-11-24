@@ -55,14 +55,20 @@ def test_full_creation_pipeline_with_mock(client, tmp_path):
     detail = _wait(client, run, {"PAUSED"})
     states = {t["key"]: t["state"] for t in detail["task_list"]}
     assert states["HUMAN_REVIEW"] == "AWAITING_HUMAN" and states["EXPORT"] == "PENDING"
-    assert all(states[s] == "SUCCEEDED" for s, _ in full_creation.STAGES[:14])
+    assert all(states[s] == "SUCCEEDED" for s, _ in full_creation.STAGES[:15])
 
     cards = client.get("/api/cards").json()
     assert len(cards) == 2 and all(c["origin"] == "MOCK" and c["schema_version"] == "2.1" for c in cards)
     assert all(c["open_errors"] == 0 for c in cards)
     calls = client.get("/api/calls").json()
-    ai_stages = [s for s, role in full_creation.STAGES if role]
-    assert sorted(c["stage"] for c in calls) == sorted(ai_stages)
+    stages = sorted(c["stage"] for c in calls)
+    # Uma chamada por etapa; a reauditoria repete a passagem científica e a pedagógica; sem pares, DEDUP não chama.
+    expected = [s for s, role in full_creation.STAGES if role and s != "DEDUP"] + ["REAUDIT"]
+    assert stages == sorted(expected)
+    out = {t["key"]: t["output"] for t in detail["task_list"]}
+    assert out["AUDIT_SCI"]["defects"] == 1 and out["CORRECTION"]["corrected"] == 1
+    assert out["CORRECTION"]["original_verdicts"]["scientific"] == "WITH_PENDING"
+    assert out["REAUDIT"]["fixed"] == 1 and out["REAUDIT"]["corrected_verdicts"]["scientific"] == "NO_OPEN_DEFECTS"
     assert all(c["prompt_hash"] and c["state"] == "SUCCEEDED" for c in calls)
 
     # Revisão humana registrada → exportação (prévia rotulada, pois nenhum card tem aprovação humana ainda).
@@ -124,7 +130,7 @@ def test_budget_and_authorization_endpoints(client):
 
 def test_prompt_endpoints(client):
     p = client.get("/api/prompts").json()
-    assert len(p["prompts"]) == 16 and all(v == [] for v in p["coverage"].values())
+    assert len(p["prompts"]) == 17 and all(v == [] for v in p["coverage"].values())
     vs = client.get("/api/prompts/role:planner/versions").json()
     v2 = client.put("/api/prompts/role:planner", json={"body": "novo\n", "author": "t"}).json()["version_id"]
     assert "+novo" in client.get("/api/prompts-diff", params={"a": vs[0]["id"], "b": v2}).json()["diff"]
