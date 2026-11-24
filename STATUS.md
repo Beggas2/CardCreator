@@ -1,5 +1,15 @@
 # STATUS
 
+## Fase 6 — experimento com modelos reais (em andamento)
+
+- 24/11/2026: a proprietária autorizou a Etapa 1 até R$ 15.
+- Pronto: `cardfactory experimento` sincroniza o catálogo da OpenRouter (consulta gratuita), escolhe um candidato
+  por família por regra (saída estruturada, contexto ≥ 64 mil tokens, lançado nos últimos 540 dias, teto de
+  preço) e estima o custo das rodadas em reais. Grava `data/experimento/etapa1-plano.md`. Também em
+  `GET /api/experiment/plan`. Nenhuma chamada de geração é feita.
+- Falta: a proprietária aprovar a lista; depois executar as rodadas A e B com o orçamento de R$ 15 cadastrado.
+- O ambiente de desenvolvimento em nuvem não alcança a OpenRouter; o catálogo e as rodadas rodam na máquina dela.
+
 ## Fase 5 — concluída (24/11/2026)
 
 - **Implementado**:
@@ -119,13 +129,3 @@
 - **Próxima etapa**: Fase 1 — Fundação.
 - **Custos**: R$ 0,00 (nenhuma chamada paga).
 - **Documentação completa da seção 31** gravada no primeiro commit (README, AGENTS, PIPELINE, PROMPT_REGISTRY, QUALITY_POLICY, SECURITY, ADRs, especificação verbatim).
-
-## Fase 6 — experimento com modelos reais (em andamento)
-
-- 24/11/2026: a proprietária autorizou a Etapa 1 até R$ 15.
-- Pronto: `cardfactory experimento` sincroniza o catálogo da OpenRouter (consulta gratuita), escolhe um candidato
-  por família por regra (saída estruturada, contexto ≥ 64 mil tokens, lançado nos últimos 540 dias, teto de
-  preço) e estima o custo das rodadas em reais. Grava `data/experimento/etapa1-plano.md`. Também em
-  `GET /api/experiment/plan`. Nenhuma chamada de geração é feita.
-- Falta: a proprietária aprovar a lista; depois executar as rodadas A e B com o orçamento de R$ 15 cadastrado.
-- O ambiente de desenvolvimento em nuvem não alcança a OpenRouter; o catálogo e as rodadas rodam na máquina dela.
