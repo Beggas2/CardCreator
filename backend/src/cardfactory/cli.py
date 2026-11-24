@@ -1,4 +1,4 @@
-"""Linha de comando: `cardfactory serve | migrate | check`."""
+"""Linha de comando: `cardfactory serve | migrate | backup | check | experimento`."""
 
 from __future__ import annotations
 
@@ -90,6 +90,42 @@ def _check(_args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _experiment(args: argparse.Namespace) -> int:
+    """Sincroniza o catálogo (gratuito) e grava a proposta da Etapa 1. Não faz chamada de geração."""
+    import asyncio
+    from decimal import Decimal
+
+    from cardfactory.benchmark import experiment
+    from cardfactory.db import Database
+    from cardfactory.db.engine import make_engine
+    from cardfactory.db.migrate import upgrade
+    from cardfactory.finance.budget import FinanceService
+    from cardfactory.providers.gateway import LLMGateway
+    from cardfactory.providers.openrouter import OpenRouterProvider
+
+    settings = load_settings(REPO_ROOT / ".env")
+    upgrade(settings.db_path)
+    db = Database(make_engine(settings.db_path))
+    finance = FinanceService(db)
+    if args.cambio:
+        finance.set_fx_rate(args.cambio, source="cli")
+    if not args.sem_sincronizar:
+        if not settings.openrouter_configured:
+            print("Configure OPENROUTER_API_KEY no .env (o catálogo não gera cobrança).", file=sys.stderr)
+            return 1
+        n = asyncio.run(LLMGateway(db, finance, OpenRouterProvider()).sync_catalog())
+        print(f"Catálogo sincronizado: {n} modelos.")
+    caps = {"creator": Decimal(args.teto), "auditor_scientific": Decimal(args.teto)} if args.teto else None
+    p = experiment.plan_from_db(db, finance, budget_brl=Decimal(args.orcamento), caps=caps)
+    out_dir = settings.data_dir / "experimento"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md = experiment.to_markdown(p)
+    (out_dir / "etapa1-plano.md").write_text(md, encoding="utf-8")
+    print(md)
+    print(f"Gravado em {out_dir / 'etapa1-plano.md'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="cardfactory")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -101,6 +137,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("migrate", help="aplica migrações do banco").set_defaults(fn=_migrate)
     sub.add_parser("backup", help="copia o banco para data/backups").set_defaults(fn=_backup)
     sub.add_parser("check", help="verifica documentos normativos e prompts").set_defaults(fn=_check)
+    e = sub.add_parser("experimento", help="Etapa 1: candidatos e custo estimado (sem chamadas pagas)")
+    e.add_argument("--orcamento", default="15", help="limite em reais (padrão 15)")
+    e.add_argument("--teto", default=None, help="preço máximo de saída em US$ por milhão de tokens")
+    e.add_argument("--cambio", default=None, help="cadastra a cotação USD→BRL antes de estimar")
+    e.add_argument("--sem-sincronizar", action="store_true", help="usa o catálogo já salvo")
+    e.set_defaults(fn=_experiment)
     args = p.parse_args(argv)
     return args.fn(args)
 

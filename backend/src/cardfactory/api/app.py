@@ -9,6 +9,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from cardfactory.audit.service import AuditError, AuditService
+from cardfactory.benchmark import experiment
 from cardfactory.benchmark.service import BenchmarkError, BenchmarkService
 from cardfactory.cards.model import CardError, structural_errors
 from cardfactory.cards.samples import SAMPLES
@@ -509,6 +511,13 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
     async def sync_models(provider: str):
         """Consulta o catálogo (endpoint gratuito; não gera cobrança)."""
         return {"models": await st.gateway(provider).sync_catalog()}
+
+    @app.get("/api/experiment/plan")
+    def experiment_plan(budget_brl: str = "15", cap_usd_m: str | None = None):
+        """Etapa 1: candidatos por família e custo estimado a partir do catálogo sincronizado (sem custo)."""
+        caps = {"creator": Decimal(cap_usd_m), "auditor_scientific": Decimal(cap_usd_m)} if cap_usd_m else None
+        p = experiment.plan_from_db(db, finance, budget_brl=Decimal(budget_brl), caps=caps)
+        return p | {"markdown": experiment.to_markdown(p)}
 
     # ------------------------------------------------------------ prompts
     @app.get("/api/prompts")

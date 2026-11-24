@@ -51,3 +51,11 @@ def test_benchmark_ai_subject_with_mock(env):
     paid = c.post("/api/bench/runs", json={"set_name": "KNOWN_DEFECTS", "subject": "auditor_scientific",
                                            "actor": "t", "provider": "openrouter"})
     assert paid.status_code == 400
+
+
+def test_experiment_plan_from_empty_catalog(env):
+    c, _ = env
+    r = c.get("/api/experiment/plan?budget_brl=15")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["creators"] == [] and body["catalog_models"] == 0 and "markdown" in body
