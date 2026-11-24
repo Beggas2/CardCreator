@@ -1,0 +1,5 @@
+# Documentos normativos: preservar bytes exatos (CRLF original)
+docs/normative/* -text
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
