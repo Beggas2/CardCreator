@@ -93,3 +93,15 @@ textarea { width: 100%; font-family: ui-monospace, Consolas, monospace; font-siz
   .split { grid-template-columns: 1fr; }
   .main { padding: 16px; }
 }
+.hits { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 10px; }
+.hits li { border-left: 3px solid var(--line); padding-left: 10px; }
+.snip { margin-top: 2px; }
+mark { background: color-mix(in srgb, var(--warn) 35%, transparent); color: inherit; border-radius: 2px; }
+.source { padding: 6px 0; border-bottom: 1px solid var(--line); }
+details { border-bottom: 1px solid var(--line); padding: 6px 0; }
+summary { cursor: pointer; }
+.section-text { white-space: pre-wrap; font-family: inherit; font-size: 13px; background: var(--bg); padding: 8px; border-radius: 6px; max-height: 360px; overflow: auto; }
+table.compact td, table.compact th { padding: 3px 6px; }
+tr.selected td { background: var(--panel-2); }
+.claim { padding: 8px 0; border-bottom: 1px solid var(--line); }
+blockquote { margin: 6px 0 0 0; padding: 6px 10px; border-left: 3px solid var(--ok); background: var(--panel-2); border-radius: 4px; }

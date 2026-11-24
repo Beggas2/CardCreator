@@ -55,6 +55,28 @@ try {
   await page.getByRole("cell", { name: "EXPORT", exact: true }).waitFor();
   await page.screenshot({ path: join(shots, "2-monitor.png"), fullPage: true });
 
+  await page.getByRole("link", { name: "Biblioteca" }).click();
+  await page.getByText("[SIMULADO] Documento de teste").first().waitFor();
+  await page.getByLabel("Termos").fill("fármaco dose");
+  await page.getByRole("button", { name: "Buscar" }).click();
+  await page.locator("mark").first().waitFor();
+  await page.screenshot({ path: join(shots, "5-biblioteca.png"), fullPage: true });
+
+  await page.getByRole("link", { name: "Conhecimento" }).click();
+  await page.getByRole("button", { name: /Condição X/ }).click();
+  await page.getByText("Integração clínica").waitFor();
+  await page.getByRole("button", { name: "[SIMULADO] Objetivo 1" }).click();
+  await page.locator("blockquote").first().waitFor();
+  await page.screenshot({ path: join(shots, "6-conhecimento.png"), fullPage: true });
+
+  await page.getByRole("link", { name: "Importação" }).click();
+  await page.getByLabel("Arquivo do Anki").setInputFiles({
+    name: "teste.txt", mimeType: "text/plain",
+    buffer: Buffer.from("#separator:tab\n#guid column:1\n#deck column:2\ng1\tIGOR::T\tFrente\tVerso\ng2\tIGOR::T\tSó frente\n"),
+  });
+  await page.getByText("2 notas · 2 novas").first().waitFor();
+  await page.screenshot({ path: join(shots, "7-importacao.png"), fullPage: true });
+
   await page.getByRole("link", { name: "Prompts" }).click();
   await page.getByText("Todos os papéis contêm os requisitos obrigatórios").waitFor();
   await page.getByRole("button", { name: /role:creator/ }).click();

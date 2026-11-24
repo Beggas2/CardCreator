@@ -5,10 +5,12 @@ export class ApiError extends Error {
 }
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const raw = body instanceof Blob;
   const r = await fetch(url, {
     method,
-    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    headers: raw ? { "Content-Type": (body as Blob).type || "application/octet-stream" }
+      : body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: raw ? (body as Blob) : body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await r.text();
   const data = text ? JSON.parse(text) : null;
@@ -19,6 +21,8 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 export const api = {
   get: <T,>(url: string) => req<T>("GET", url),
   post: <T,>(url: string, body: unknown = {}) => req<T>("POST", url, body),
+  upload: <T,>(url: string, file: Blob) => req<T>("POST", url, file),
+  patch: <T,>(url: string, body: unknown) => req<T>("PATCH", url, body),
   put: <T,>(url: string, body: unknown) => req<T>("PUT", url, body),
   del: <T,>(url: string) => req<T>("DELETE", url),
 };

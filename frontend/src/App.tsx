@@ -3,10 +3,16 @@ import Dashboard from "./pages/Dashboard";
 import Monitor from "./pages/Monitor";
 import Prompts from "./pages/Prompts";
 import Budget from "./pages/Budget";
+import Library from "./pages/Library";
+import Imports from "./pages/Imports";
+import Knowledge from "./pages/Knowledge";
 
 const PAGES = [
   { id: "painel", label: "Painel", el: <Dashboard /> },
   { id: "monitor", label: "Monitor", el: <Monitor /> },
+  { id: "biblioteca", label: "Biblioteca", el: <Library /> },
+  { id: "conhecimento", label: "Conhecimento", el: <Knowledge /> },
+  { id: "importacao", label: "Importação", el: <Imports /> },
   { id: "prompts", label: "Prompts", el: <Prompts /> },
   { id: "orcamento", label: "Orçamento", el: <Budget /> },
 ] as const;
@@ -32,7 +38,7 @@ export default function App() {
             {p.label}
           </a>
         ))}
-        <div className="nav-foot">Fase 1 · dados locais</div>
+        <div className="nav-foot">Fase 2 · dados locais</div>
       </nav>
       <main className="main">{PAGES.find((p) => p.id === page)!.el}</main>
     </div>

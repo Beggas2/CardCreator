@@ -5,13 +5,17 @@ const STATE_TONE: Record<string, string> = {
   RUNNING: "info", READY: "info", SENT: "info", RESERVED: "info",
   PENDING: "muted", DRAFT: "muted", GENERATED: "muted",
   PAUSED: "warn", PAUSED_BUDGET: "warn", AWAITING_HUMAN: "warn", TRUNCATED: "warn", INVALID_OUTPUT: "warn",
+  VERIFIED: "ok", RETRIEVED: "info", FOUND: "muted", PARTIALLY_READ: "warn", UNAVAILABLE: "bad", OUTDATED: "bad",
+  VALIDITY_UNCERTAIN: "warn", IMPORTED: "info", QUARANTINE: "bad",
   FAILED: "bad", FAILED_BILLED: "bad", CANCELLED: "muted", UNCERTAIN: "bad", FAILED_UNBILLED: "muted",
 };
 
 const STATE_LABEL: Record<string, string> = {
   SUCCEEDED: "concluída", COMPLETED: "concluída", SKIPPED_REUSED: "dispensada", RUNNING: "executando",
   READY: "pronta", PENDING: "aguardando", PAUSED: "pausada", PAUSED_BUDGET: "pausada (orçamento)",
-  AWAITING_HUMAN: "aguardando revisão", FAILED: "falhou", CANCELLED: "cancelada", UNCERTAIN: "incerta",
+  AWAITING_HUMAN: "aguardando revisão", VERIFIED: "conferido", RETRIEVED: "recuperado", FOUND: "encontrado",
+  PARTIALLY_READ: "lido em parte", UNAVAILABLE: "indisponível", OUTDATED: "desatualizado",
+  VALIDITY_UNCERTAIN: "vigência incerta", IMPORTED: "importado", QUARANTINE: "quarentena", FAILED: "falhou", CANCELLED: "cancelada", UNCERTAIN: "incerta",
 };
 
 export function Badge({ state }: { state: string }) {

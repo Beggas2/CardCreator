@@ -1,5 +1,27 @@
 # STATUS
 
+## Fase 2 — concluída (24/11/2026)
+
+- **Implementado**:
+  - Biblioteca científica: fontes, versões (publicação, atualização de página e vigência separadas), documentos com 7 estados e histórico de transições, seções, busca FTS5 sem acento com filtros.
+  - Leitura local de HTML (títulos, tabelas, rodapés), texto e PDF; páginas sem texto e tabelas irregulares viram pendência.
+  - Evidência só é aceita com trecho literal da seção.
+  - Download com proteção SSRF.
+  - Importação de export do Anki com relatório por linha, quarentena e GUID preservado; reimportação versionada.
+  - Importação de questões com separação determinística planejamento/avaliação.
+  - Conhecimento: 57 dimensões (união C§9 + R§13), comparação com mapa independente, objetivos com reserva atômica, cobertura com denominador explícito, afirmações por componente, veredictos append-only.
+  - Papéis pesquisador, extrator e planejador ligados ao pipeline com contratos em JSON Schema estrito; violação de contrato não repete a chamada.
+  - Telas Biblioteca, Conhecimento e Importação.
+- **Efetivamente testado**: 148 testes pytest sem rede e smoke Playwright das sete telas; CI verde em Ubuntu e Windows.
+- **Limitações**:
+  - Papéis de IA testados só com o simulado. A qualidade real de extração e planejamento depende do modelo e será medida no benchmark (Fase 5).
+  - Sem OCR (páginas escaneadas ficam pendentes).
+  - Sem busca semântica; só textual. Embeddings entram com a deduplicação (Fase 4).
+  - Mapa independente e auditoria de cobertura ficam para a Fase 4.
+- **Custos**: R$ 0,00.
+- **Próxima etapa**: Fase 3, geração e renderização (card.v2, renderizador, validadores, exportação TSV).
+
+
 ## Fase 1 — concluída (24/11/2026)
 
 - **Implementado**:

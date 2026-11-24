@@ -37,7 +37,7 @@ Demais modos (Atualização científica, Reformatação, Reconstrução, Complem
 ## Estados do card (E§27)
 
 `DRAFT → GENERATED → IN_AUDIT → (CORRECTED → IN_AUDIT)* → AUTO_APPROVED → PENDING_HUMAN → HUMAN_APPROVED → READY_FOR_EXPORT → COMMERCIALLY_RELEASED`
-com saídas laterais `REJECTED`, `QUARANTINE`, `OUTDATED`. `HUMAN_APPROVED` exige registro em `human_review`; `COMMERCIALLY_RELEASED` exige `release_gate` sem bloqueios.
+com saídas laterais `REJECTED`, `QUARANTINE`, `OUTDATED`. Cards vindos de export do Anki entram como `IMPORTED` (ou `QUARANTINE`, com o motivo, quando a linha tem problema). `HUMAN_APPROVED` exige registro em `human_review`; `COMMERCIALLY_RELEASED` exige `release_gate` sem bloqueios.
 
 ## Estados de execução
 
