@@ -76,9 +76,15 @@ async def call_role(svc: ResearchServices, ctx: TaskContext, role: str, schema: 
     r = await svc.gateway.call(req, budget_ids=ctx.input["budget_ids"], task_id=ctx.task_id, stage=ctx.stage,
                                prompt_version_ids=composed.version_ids, prompt_hash=composed.hash,
                                critical=critical, web_searches=web_searches, web_search_price_usd=web_price)
+    if r.status == "truncated":
+        raise TruncatedOutputError(f"saída truncada do papel {role}; aumente o limite de saída ou reduza o lote")
     if r.status != "ok":
         raise ContractViolation(f"saída {r.status} do papel {role}; aumente o limite de saída ou reduza o lote")
     return r.parsed, r.call_id
+
+
+class TruncatedOutputError(ContractViolation):
+    """A resposta passou do limite de saída; quem chama pode dividir o lote."""
 
 
 # ---------------------------------------------------------------------------- RESEARCH
@@ -94,7 +100,8 @@ async def research(svc: ResearchServices, ctx: TaskContext) -> dict:
         cached = s.execute(select(ResearchQuery).where(ResearchQuery.cache_key == cache_key,
                                                        ResearchQuery.created_at >= cutoff)
                            .order_by(ResearchQuery.created_at.desc()).limit(1)).scalar_one_or_none()
-        cached_result = cached.result if cached else None
+        # Resultado sem nenhum candidato não é reaproveitado: costuma indicar pesquisa sem acesso à web.
+        cached_result = cached.result if cached and cached.result.get("candidates") else None
     call_id = None
     if cached_result is not None:
         parsed = cached_result
@@ -191,16 +198,30 @@ async def extraction(svc: ResearchServices, ctx: TaskContext) -> dict:
             secs = list(s.execute(select(DocumentSection).where(DocumentSection.document_id == did,
                                                                 DocumentSection.parse_quality != "FAILED")
                                   .order_by(DocumentSection.ordinal)).scalars())
-        for i, batch in enumerate(_batches(secs)):
-            bkey = f"{did}:{i}"
+        queue = [(f"{did}:{i}", batch) for i, batch in enumerate(_batches(secs))]
+        while queue:
+            bkey, batch = queue.pop(0)
             if bkey in done:
                 continue
             ids = {s.id for s in batch}
             body = "\n\n".join(wrap_untrusted(s.id, f"[{s.path}]\n{s.text}") for s in batch)
             user = (f"Tema: {prd.theme}\nExtraia afirmações verificáveis relevantes ao tema. Para cada uma, copie "
                     f"o trecho literal (quote) da seção e informe o section_id.\n\n{body}")
-            parsed, call_id = await call_role(svc, ctx, "extractor", EXTRACTION_V1, user, f"extract:{bkey}",
-                                              critical=True)
+            # Um lote de ~12 mil caracteres pode render dezenas de afirmações com trecho literal: 6 mil tokens
+            # de saída truncavam na prática (Etapa 1, 24/11/2026). Se ainda truncar, o lote é dividido.
+            try:
+                parsed, call_id = await call_role(svc, ctx, "extractor", EXTRACTION_V1, user, f"extract:{bkey}",
+                                                  critical=True, max_tokens=16000)
+            except TruncatedOutputError:
+                if len(batch) > 1:
+                    half = len(batch) // 2
+                    queue[:0] = [(f"{bkey}a", batch[:half]), (f"{bkey}b", batch[half:])]
+                    continue
+                rejected.append({"reason": "seção não processada: a extração truncou mesmo sozinha",
+                                 "text": batch[0].path[:200]})
+                done[bkey] = None
+                ctx.save_checkpoint({"done": done, "claim_ids": claim_ids, "rejected": rejected})
+                continue
             for c in parsed["claims"]:
                 if c["section_id"] not in ids:
                     rejected.append({"reason": "seção fora do lote", "text": c["text"][:200]})
@@ -244,7 +265,8 @@ async def planning(svc: ResearchServices, ctx: TaskContext) -> dict:
     user = (f"Tema: {prd.theme}\nMeta aproximada de cards: {prd.target_cards}\n\nDimensões do mapa (classifique "
             f"todas as 57 para cada entidade):\n{dims}\n\nAfirmações verificadas disponíveis (use só estes IDs):\n"
             f"{listing}")
-    parsed, call_id = await call_role(svc, ctx, "planner", PLAN_V1, user, "plan", max_tokens=16000)
+    # 57 dimensões com justificativa por entidade, mais o raciocínio do modelo: 16 mil tokens truncavam.
+    parsed, call_id = await call_role(svc, ctx, "planner", PLAN_V1, user, "plan", max_tokens=48000)
     known = {c.id for c in claims}
     entity_ids: dict[str, str] = {}
     for e in parsed["entities"]:

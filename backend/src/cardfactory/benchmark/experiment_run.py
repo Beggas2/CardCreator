@@ -108,10 +108,19 @@ def _cost(db: Database, prefix: str) -> Decimal:
         return sum((Decimal(str(c)) for c in rows if c is not None), Decimal(0))
 
 
+def _run_cost(db: Database, run_id: str) -> Decimal:
+    """Custo das chamadas feitas pelas tarefas de uma execução do grafo (chaves por tarefa)."""
+    with db.session() as s:
+        rows = s.execute(select(LLMCall.cost_usd).join(Task, Task.id == LLMCall.task_id)
+                         .where(Task.run_id == run_id)).scalars()
+        return sum((Decimal(str(c)) for c in rows if c is not None), Decimal(0))
+
+
 # ---------------------------------------------------------------------------- preparação
 async def prepare(env: Env, *, theme: str, support_model: str, budget_id: str, web_search: dict | None = None,
-                  web_search_price_usd: str | None = None, target_cards: int = 30) -> dict[str, Any]:
-    models = {"default": support_model}
+                  web_search_price_usd: str | None = None, target_cards: int = 30,
+                  research_model: str | None = None) -> dict[str, Any]:
+    models = {"default": support_model} | ({"RESEARCH": research_model} if research_model else {})
     with env.db.write() as s:
         prj = s.execute(select(Project).where(Project.name == PROJECT)).scalar_one_or_none()
         if prj is None:
@@ -135,7 +144,7 @@ async def prepare(env: Env, *, theme: str, support_model: str, budget_id: str, w
         tasks = {t.stage: {"state": t.state, "error": t.last_error} for t in
                  s.execute(select(Task).where(Task.run_id == run_id)).scalars()}
     return {"production_id": prd_id, "run_id": run_id, "state": state, "tasks": tasks,
-            "ready_objectives": ready_objectives(env, prd_id), "cost_usd": str(_cost(env.db, run_id))}
+            "ready_objectives": ready_objectives(env, prd_id), "cost_usd": str(_run_cost(env.db, run_id))}
 
 
 def ready_objectives(env: Env, prd_id: str) -> list[str]:
@@ -262,3 +271,33 @@ async def round_b(env: Env, *, auditors: list[str], budget_id: str, actor: str) 
         except Exception as e:  # noqa: BLE001
             out.append({"model": m, "error": f"{type(e).__name__}: {e}"[:300]})
     return out
+
+
+# ---------------------------------------------------------------------------- produção completa
+async def full_run(env: Env, *, theme: str, models: dict[str, str], budget_id: str, target_cards: int,
+                   web_search: dict | None = None, web_search_price_usd: str | None = None) -> dict[str, Any]:
+    """Uma produção de ponta a ponta pelo grafo normal (para na revisão humana obrigatória)."""
+    with env.db.write() as s:
+        prj = s.execute(select(Project).where(Project.name == PROJECT)).scalar_one_or_none()
+        if prj is None:
+            prj = Project(name=PROJECT)
+            s.add(prj)
+            s.flush()
+        scope: dict[str, Any] = {"models": models, "experiment": "etapa1-completo"}
+        if web_search:
+            scope |= {"web_search": web_search, "web_search_price_usd": web_search_price_usd}
+        prd = Production(project_id=prj.id, mode=full_creation.MODE, theme=theme, target_cards=target_cards,
+                         provider=env.gateway.provider.name, research_mode="AUTONOMOUS", scope=scope)
+        s.add(prd)
+        s.flush()
+        prd_id = prd.id
+    orch = Orchestrator(env.db, full_audit.handlers(_services(env, models)))
+    run_id = orch.create_run(prd_id, full_creation.MODE, full_creation.graph([budget_id]),
+                             note="Etapa 1: produção completa curta")
+    orch.start(run_id)
+    state = await orch.run_until_idle(run_id, concurrency=2)
+    with env.db.session() as s:
+        tasks = {t.stage: {"state": t.state, "error": t.last_error, "output": t.output} for t in
+                 s.execute(select(Task).where(Task.run_id == run_id)).scalars()}
+    return {"production_id": prd_id, "run_id": run_id, "state": state, "tasks": tasks,
+            "cost_usd": str(_run_cost(env.db, run_id))}

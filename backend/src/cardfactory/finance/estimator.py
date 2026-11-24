@@ -61,7 +61,7 @@ def estimate_call(
         if web_search_price_usd is None:
             reasons.append("preço de pesquisa web desconhecido")
         else:
-            total += web_search_price_usd * web_searches
+            total += Decimal(str(web_search_price_usd)) * web_searches  # escopo guarda o preço como texto
     if ocr_pages:
         if ocr_price_per_page_usd is None:
             reasons.append("preço de OCR desconhecido")

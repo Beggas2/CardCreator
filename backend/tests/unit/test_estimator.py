@@ -27,3 +27,8 @@ def test_reasoning_price_used_when_higher():
     p = dict(PRICING, internal_reasoning="0.00001")
     e = estimate_call(p, input_chars=0, max_output_tokens=100, repair_attempts=0)
     assert e.basis["price_out"] == "0.00001"
+
+
+def test_web_search_price_as_text_from_scope():
+    e = estimate_call(PRICING, input_chars=10, max_output_tokens=10, web_searches=2, web_search_price_usd="0.02")
+    assert e.safe and e.max_usd > 0

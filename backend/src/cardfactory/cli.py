@@ -175,9 +175,15 @@ def _etapa1(args: argparse.Namespace) -> int:
     if args.passo == "preparar":
         ws = {"max_results": args.busca_web} if args.busca_web else None
         out = asyncio.run(er.prepare(env, theme=args.tema, support_model=args.apoio, budget_id=state["budget_id"],
-                                     web_search=ws, web_search_price_usd=args.preco_busca))
+                                     web_search=ws, web_search_price_usd=args.preco_busca,
+                                     research_model=args.pesquisador))
         state["prepare"] = out
         state["objective_ids"] = er.pick_objectives(env, out["production_id"], args.objetivos)
+    elif args.passo == "completo":
+        models = dict(kv.split("=", 1) for kv in lst)  # ETAPA=modelo; "default" cobre as demais
+        out = asyncio.run(er.full_run(env, theme=args.tema, models=models, budget_id=state["budget_id"],
+                                      target_cards=args.cards))
+        state.setdefault("full", []).append(out)
     elif args.passo == "a":
         out = asyncio.run(er.round_a(env, pilot_production_id=state["prepare"]["production_id"],
                                      objective_ids=state["objective_ids"], creators=lst, auditor=args.apoio,
@@ -211,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--sem-sincronizar", action="store_true", help="usa o catálogo já salvo")
     e.set_defaults(fn=_experiment)
     t = sub.add_parser("etapa1", help="Etapa 1 com modelos reais: orcamento | preparar | a | b")
-    t.add_argument("passo", choices=["orcamento", "preparar", "a", "b"])
+    t.add_argument("passo", choices=["orcamento", "preparar", "completo", "a", "b"])
     t.add_argument("--cambio")
     t.add_argument("--limite", help="limite em reais")
     t.add_argument("--autorizado-por")
@@ -220,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--apoio", help="modelo de pesquisa/extração/planejamento e auditor fixo")
     t.add_argument("--modelos", help="lista separada por vírgulas (criadores na rodada A, auditores na B)")
     t.add_argument("--objetivos", type=int, default=5)
+    t.add_argument("--cards", type=int, default=8, help="meta de cards da produção completa")
+    t.add_argument("--pesquisador", help="modelo só da pesquisa de fontes (padrão: o de apoio)")
     t.add_argument("--busca-web", type=int, default=0, help="resultados de busca na pesquisa (0 = sem busca)")
     t.add_argument("--preco-busca", default=None, help="US$ por busca, para a estimativa")
     t.set_defaults(fn=_etapa1)

@@ -91,9 +91,30 @@ def locate_quote(section_text: str, quote: str) -> tuple[int, int] | None:
         return i, i + len(quote)
     norm, idx = _ws_map(section_text)
     j = norm.find(q)
-    if j < 0:
+    if j >= 0:
+        return idx[j], idx[j + len(q) - 1] + 1
+    return _locate_words(section_text, quote)
+
+
+WORD_RE = re.compile(r"\w+", re.UNICODE)
+MIN_WORDS_TOLERANT = 6
+
+
+def _locate_words(section_text: str, quote: str) -> tuple[int, int] | None:
+    """Mesmas palavras, na mesma ordem, ignorando pontuação, caixa e quebras (marcadores de lista, ';' de PDF).
+
+    O trecho gravado é sempre o texto original da seção nessa posição, nunca a versão do modelo.
+    """
+    q = [w.lower() for w in WORD_RE.findall(quote)]
+    if len(q) < MIN_WORDS_TOLERANT:
         return None
-    return idx[j], idx[j + len(q) - 1] + 1
+    toks = [(m.group().lower(), m.start(), m.end()) for m in WORD_RE.finditer(section_text)]
+    words = [t[0] for t in toks]
+    n = len(q)
+    for i in range(len(words) - n + 1):
+        if words[i] == q[0] and words[i:i + n] == q:
+            return toks[i][1], toks[i + n - 1][2]
+    return None
 
 
 def fts_query(terms: str) -> str:

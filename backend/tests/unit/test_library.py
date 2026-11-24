@@ -150,3 +150,14 @@ def test_fts_query_quoting():
 def test_locate_quote_whitespace():
     assert locate_quote("a  b\nc", "a b c") == (0, 6)
     assert locate_quote("abc", "") is None
+
+
+def test_locate_quote_tolerates_punctuation_but_keeps_source_text():
+    from cardfactory.library.service import locate_quote
+
+    sec = "Nos cães:\n• Intensa coceira, vermelhidão, irritação na pele\n• Perda de pelos"
+    q = "Nos cães: Intensa coceira, vermelhidão, irritação na pele; Perda de pelos"
+    a, b = locate_quote(sec, q)
+    assert sec[a:b].startswith("Nos cães") and sec[a:b].endswith("pelos")
+    assert locate_quote(sec, "Nos gatos: intensa coceira, vermelhidão, irritação na pele") is None
+    assert locate_quote(sec, "coceira; vermelhidão") is None  # curto demais para a forma tolerante
