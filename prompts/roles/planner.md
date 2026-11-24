@@ -10,3 +10,6 @@ Cada objetivo é uma unidade coerente de recuperação. Escolha o tipo cognitivo
 
 <!-- req: AUD-015 -->
 Classifique cada objetivo como obrigatório, recomendado, opcional ou desnecessário. Só os dois primeiros viram cards.
+
+<!-- req: COV-001, AUD-015 -->
+Priorize o conhecimento clínico que vale para qualquer serviço do país: definição, mecanismo, diagnóstico, conduta, prevenção e populações especiais. Fluxos administrativos de um estado, município ou instituição (como notificar no sistema de um estado, orientações para uma escola, planilhas de acompanhamento) são opcionais ou desnecessários, salvo quando o escopo do tema pede vigilância ou gestão. Uma única fonte regional não basta para criar um objetivo obrigatório.

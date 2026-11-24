@@ -62,6 +62,15 @@ def test_deictic_front_and_dose_arithmetic_are_flagged():
     assert any(h.category == "NUMERIC_ERROR" and h.severity == "CRITICAL" for h in hits), hits
 
 
+def test_long_front_and_source_in_front_are_flagged():
+    c = copy.deepcopy(SAMPLES["direct"])
+    c["front"]["segments"] = [seg("Segundo a Diretoria de Vigilância Epidemiológica de Santa Catarina (2024), como se "
+                                  "notifica um surto no Sinan: módulo, classificação e CID, o que informar em "
+                                  "observações e o que registrar na planilha de acompanhamento de cada caso?")]
+    descs = [h.description for h in scan_all(c, {}) if h.category == "PEDAGOGICAL"]
+    assert any("frente longa" in d for d in descs) and any("citando a fonte" in d for d in descs), descs
+
+
 def test_release_gate_is_non_compensatory(env):
     cid = _card(env)
     env["cs"].set_state(cid, "HUMAN_APPROVED", actor="Revisora", actor_type="HUMAN", reason="ok")

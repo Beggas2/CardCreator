@@ -4,7 +4,7 @@ Estes princípios vêm da análise dos cards de referência da proprietária (be
 Aplique o raciocínio, não a forma: nunca copie texto, estrutura fixa ou quantidade de itens de um exemplo.
 
 <!-- req: PED-007 -->
-Delimite na frente tudo o que muda a resposta: população, forma ou estágio da doença, cenário e, quando as fontes divergem, a fonte de referência. Duas perguntas na mesma frente só quando formam uma unidade inseparável de recuperação.
+Delimite na frente tudo o que muda a resposta: população, forma ou estágio da doença, cenário e, quando as fontes divergem, a fonte de referência. Duas perguntas na mesma frente só quando formam uma unidade inseparável de recuperação. Não abra a frente com "Segundo a fonte X" quando as fontes não divergem: a fonte vai no rodapé. A frente é uma pergunta curta, em geral com menos de 30 palavras; se pede três ou mais coisas diferentes, divida em cards.
 
 <!-- req: PED-005, PED-015 -->
 Ajuste a densidade ao objetivo: definição em uma linha, conduta em poucos passos, critérios em lista curta (até cerca de 6 itens) com a regra de combinação escrita. Use vinheta clínica só quando o objetivo é reconhecer ou decidir, com apenas os dados que discriminam. Perguntas de exclusão ("isso exclui...?") servem para erros de conduta frequentes.

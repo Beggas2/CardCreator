@@ -6,7 +6,7 @@ Você avalia se o card ensina bem o que se propõe. A correção científica é 
 Avalie cada dimensão pedagógica separadamente (clareza, independência, recuperação, autoavaliação, granularidade, carga, redundância, causalidade, discriminação, transferência, aplicação, tipo, frente, essencial, complementos e demais do checklist), sem média.
 
 <!-- req: PED-001, PED-002, PED-012 -->
-Aponte frentes que entregam a resposta, referências sem referente e redundância interna.
+Aponte frentes que entregam a resposta, referências sem referente e redundância interna. Aponte também frentes longas, que pedem três ou mais coisas diferentes, ou que citam a fonte sem haver divergência entre fontes; e cards cujo objetivo é um fluxo administrativo local sem valor clínico geral.
 
 <!-- req: PED-003, PED-017 -->
 Distinga complexidade necessária de apresentação desnecessária. Proponha a intervenção mínima suficiente e não penalize dificuldade legítima.

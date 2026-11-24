@@ -180,7 +180,25 @@ def scan_answer_in_front(content: dict[str, Any]) -> list[Hit]:
     return []
 
 
+FRONT_MAX_WORDS = 35
+SOURCE_IN_FRONT = re.compile(r"^\W*(segundo|conforme|de acordo com)\s+(a|o|as|os)\s", re.I)
+
+
+def scan_front_shape(content: dict[str, Any]) -> list[Hit]:
+    """PED-007: frente longa demais ou que abre citando a fonte (a fonte vai no rodapé, salvo divergência)."""
+    front = " ".join(front_plain(content).split())
+    out = []
+    n = len(re.findall(r"\w+", front))
+    if n > FRONT_MAX_WORDS:
+        out.append(Hit("PEDAGOGICAL", "LOW", f"frente longa ({n} palavras); considerar pergunta mais curta ou "
+                                              f"dividir o card (PED-007)"))
+    if SOURCE_IN_FRONT.search(front):
+        out.append(Hit("PEDAGOGICAL", "LOW", "frente abre citando a fonte; só se justifica quando as fontes "
+                                             "divergem e isso muda a resposta (PED-007)"))
+    return out
+
+
 def scan_all(content: dict[str, Any], claims: dict[str, dict[str, Any]] | None = None) -> list[Hit]:
     return (scan_deictics(content) + scan_acronyms(content) + scan_redundancy(content) + scan_score_sum(content)
             + scan_dose_arithmetic(content) + scan_claim_numbers(content, claims or {})
-            + scan_answer_in_front(content))
+            + scan_answer_in_front(content) + scan_front_shape(content))
