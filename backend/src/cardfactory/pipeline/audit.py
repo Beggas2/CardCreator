@@ -53,6 +53,8 @@ from cardfactory.providers.base import LLMRequest
 from cardfactory.validation.html import normalized_text
 
 AUDIT_BATCH = 6
+PLACEHOLDER_RE = re.compile(r"^(exemplo|example|lorem ipsum|placeholder)\b", re.IGNORECASE)
+CORRECTION_BATCH = 2  # cada correção devolve o card inteiro: lotes de 6 truncavam em 16 mil tokens
 MAX_CORRECTIONS = 2
 CORRECTABLE = ("CRITICAL", "HIGH", "MEDIUM")
 SELF_ASSESSMENT = ("validation_status", "limitations")
@@ -297,7 +299,8 @@ async def _pedagogical(svc: ResearchServices, ctx: TaskContext, prd: Production,
     for i, batch in enumerate(_batches(cards, AUDIT_BATCH)):
         user = (f"Tema: {prd.theme}\nAvalie pedagogicamente cada card nas 17 dimensões ({', '.join(PED_DIMENSIONS)})."
                 f" KEEP é o padrão.\n\n" + "\n\n".join(_card_block(c) for c in batch))
-        parsed, call_id = await _call(svc, ctx, "auditor_pedagogical", PED_AUDIT_V1, user, f"{key}.b{i}")
+        parsed, call_id = await _call(svc, ctx, "auditor_pedagogical", PED_AUDIT_V1, user, f"{key}.b{i}",
+                                     max_tokens=24000)  # reescritas propostas de 6 cards truncavam em 12 mil
         by_key = {c["key"]: c for c in batch}
         first_aid = None
         for r in parsed["cards"]:
@@ -409,12 +412,17 @@ async def audit_coverage(svc: ResearchServices, ctx: TaskContext) -> dict:
         if o["objective_ref"] in known:
             svc.knowledge.set_coverage(o["objective_ref"], o["coverage_state"])
             states[o["objective_ref"]] = o["coverage_state"]
+    placeholders = 0
     for g in parsed["gaps"]:
+        if PLACEHOLDER_RE.match(g["description"].strip()):
+            placeholders += 1  # texto de exemplo copiado do formato (visto na Etapa 1); não é lacuna real
+            continue
         aud.add_defect(card_id=None, production_id=prd.id, category="GAP", severity=NECESSITY_SEVERITY[g["necessity"]],
                        description=f"lacuna ({g['necessity']}): {g['description']}"
                                    + (f" · sugestão: {g['suggested_card']}" if g["suggested_card"] else ""),
                        audit_id=aid)
-    out = {"objectives_classified": len(states), "gaps": len(parsed["gaps"]), "map_differences": diffs,
+    out = {"objectives_classified": len(states), "objectives_total": len(known),
+           "gaps": len(parsed["gaps"]) - placeholders, "placeholder_gaps": placeholders, "map_differences": diffs,
            "entities_without_creator_map": no_creator_map,
            "self_sufficiency": dict(_count(x["answer"] for x in parsed["self_sufficiency"])),
            "coverage": svc.knowledge.coverage_report(prd.id), "call_id": call_id}
@@ -490,7 +498,7 @@ async def correction(svc: ResearchServices, ctx: TaskContext, cs: CardService) -
     cards = {c["id"]: c for c in _cards(svc, prd, only=list(todo))}
     stats = {"corrected": 0, "kept": 0, "proposed": 0, "quarantined": 0, "rejected": [], "escalated": escalated}
     corrected_ids: list[str] = list(ctx.checkpoint.get("corrected_ids", []))
-    for i, batch in enumerate(_batches([c for c in cards.values()], AUDIT_BATCH)):
+    for i, batch in enumerate(_batches([c for c in cards.values()], CORRECTION_BATCH)):
         parts = []
         for c in batch:
             ds = "\n".join(f"  - {d.id} | {d.severity} | {d.category} | {d.description}" for d in todo[c["id"]])
@@ -500,7 +508,7 @@ async def correction(svc: ResearchServices, ctx: TaskContext, cs: CardService) -
                          f"Conteúdo atual ({'card.v2' if not c['legacy'] else 'legado; devolva card.v2'}):\n{body}")
         user = (f"Tema: {prd.theme}\nProponha a correção mínima suficiente para os defeitos abaixo.\n\n"
                 + "\n\n".join(parts))
-        parsed, call_id = await _call(svc, ctx, "corrector", CORRECTION_V1, user, f"fix.b{i}", max_tokens=16000)
+        parsed, call_id = await _call(svc, ctx, "corrector", CORRECTION_V1, user, f"fix.b{i}", max_tokens=24000)
         by_key = {c["key"]: c for c in batch}
         for corr in parsed["corrections"]:
             c = by_key.get(corr["card_ref"])

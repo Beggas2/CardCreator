@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from cardfactory.contracts.schemas import EXTRACTION_V1, PLAN_V1, RESEARCH_RESULT_V1, schema_name
 from cardfactory.db import Database
 from cardfactory.db.models import (
+    Card,
     Claim,
     ClaimEvidence,
     Document,
@@ -268,6 +269,9 @@ async def planning(svc: ResearchServices, ctx: TaskContext) -> dict:
     # 57 dimensões com justificativa por entidade, mais o raciocínio do modelo: 16 mil tokens truncavam.
     parsed, call_id = await call_role(svc, ctx, "planner", PLAN_V1, user, "plan", max_tokens=48000)
     known = {c.id for c in claims}
+    with svc.db.session() as s:
+        project_cards = s.execute(select(func.count()).select_from(Card).where(
+            Card.project_id == prd.project_id)).scalar_one()
     entity_ids: dict[str, str] = {}
     for e in parsed["entities"]:
         codes = [d["code"] for d in e["dimensions"]]
@@ -288,6 +292,11 @@ async def planning(svc: ResearchServices, ctx: TaskContext) -> dict:
     problems: list[str] = []
     for o in parsed["objectives"]:
         deps = [refs[d] for d in o["depends_on"] if d in refs]
+        if o["coverage_state"] == "COVERED_ELSEWHERE" and not project_cards:
+            # Sem nenhum card no projeto, "coberto em outro lugar" não tem onde estar (Etapa 1: o planejador
+            # marcou os 20 objetivos assim e a produção parou sem gerar nada).
+            problems.append(f"{o['ref']}: COVERED_ELSEWHERE sem cards no projeto; tratado como ABSENT")
+            o = {**o, "coverage_state": "ABSENT"}
         try:
             oid = svc.knowledge.add_objective(
                 prd.project_id, o["description"], entity_id=entity_ids.get(o["entity"]), production_id=prd.id,

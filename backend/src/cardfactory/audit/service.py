@@ -84,7 +84,7 @@ class AuditService:
                                                     Defect.status == "OPEN")).first()
             if dup:
                 return None
-            d = Defect(card_id=card_id, production_id=production_id, audit_id=audit_id, category=category,
+            d = Defect(card_id=card_id, production_id=production_id, audit_id=audit_id or None, category=category,
                        severity=severity, description=description, evidence_ids=evidence_ids or [], origin=origin)
             s.add(d)
             s.flush()

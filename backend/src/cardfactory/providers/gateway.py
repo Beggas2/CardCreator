@@ -258,8 +258,12 @@ class LLMGateway:
             return text, None
         if not text:
             return None, "resposta vazia"
+        stripped = text.strip()
+        if stripped.startswith("```"):  # modo sem gramática: alguns modelos cercam o JSON com ```json
+            stripped = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+            stripped = stripped.rsplit("```", 1)[0]
         try:
-            data = json.loads(text)
+            data = json.loads(stripped)
         except json.JSONDecodeError as e:
             return None, f"JSON inválido: {e}"
         try:

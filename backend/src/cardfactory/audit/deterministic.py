@@ -146,8 +146,15 @@ def scan_claim_numbers(content: dict[str, Any], claims: dict[str, dict[str, Any]
                     nums = [_f(x) for x in re.findall(NUM, sg["text"])]
                     if nums and not any(abs(n - float(num["value"])) < 1e-9 for n in nums):
                         ref = f"{num['value']} {num.get('unit', '')}"
-                        msg = f"valor '{sg['text']}' difere da afirmação verificada ({ref})"
-                        out.append(Hit("NUMERIC_ERROR", "CRITICAL", msg))
+                        unit_tok = re.split(r"[/\s]", (num.get("unit") or "").strip().lower())[0]
+                        if unit_tok and re.search(rf"(?<!\w){re.escape(unit_tok)}(?!\w)", sg["text"].lower()):
+                            msg = f"valor '{sg['text']}' difere da afirmação verificada ({ref})"
+                            out.append(Hit("NUMERIC_ERROR", "CRITICAL", msg))
+                        else:
+                            # Sem a unidade da afirmação, o número pode ser outra grandeza (ex.: dias 1, 2 e 8
+                            # citando a afirmação da dose em mg/kg): pede conferência, não bloqueia como erro.
+                            out.append(Hit("TRACEABILITY", "MEDIUM", f"valor '{sg['text']}' cita afirmação numérica "
+                                                                     f"de outra grandeza ({ref}); conferir vínculo"))
                     unit = (num.get("unit") or "").split("/")[0].strip()
                     if unit in MASS and nums:
                         shown = re.findall(r"\b(g|mg|mcg|µg|ug|ng)\b", sg["text"])

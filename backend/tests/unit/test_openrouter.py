@@ -186,3 +186,27 @@ def test_auth_via_proxy_sends_no_key(monkeypatch):
     monkeypatch.delenv("OPENROUTER_AUTH_VIA_PROXY")
     with pytest.raises(RuntimeError):
         c._client(5)
+
+
+async def test_grammar_too_large_retries_with_schema_in_prompt(monkeypatch):
+    import httpx as hx
+
+    from cardfactory.providers.base import LLMRequest
+    from cardfactory.providers.openrouter import OpenRouterProvider
+
+    seen = []
+
+    def handler(request):
+        body = __import__("json").loads(request.content)
+        grammar = "response_format" in body
+        seen.append(grammar)
+        if grammar:
+            return hx.Response(400, json={"error": {"code": 400, "message": "Provider returned error", "metadata": {
+                "raw": "The compiled grammar is too large, which would cause performance issues."}}})
+        return hx.Response(200, json={"id": "gen-1", "model": "m", "choices": [
+            {"finish_reason": "stop", "message": {"content": "{}"}}], "usage": {}})
+
+    p = OpenRouterProvider(api_key="k", transport=hx.MockTransport(handler))
+    r = await p.complete(LLMRequest(model_id="m", messages=[], max_output_tokens=10, idempotency_key="k",
+                                    response_schema={"type": "object"}, schema_name="s"))
+    assert seen == [True, False] and r.status == "ok"

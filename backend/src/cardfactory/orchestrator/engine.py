@@ -98,7 +98,8 @@ class TaskContext:
         with self._orch.db.session() as s:
             rows = s.execute(select(Task).join(TaskDependency, TaskDependency.depends_on_task_id == Task.id)
                              .where(TaskDependency.task_id == self.task_id)).scalars()
-            return {t.idempotency_key.split(":", 1)[1]: t.output for t in rows}
+            # Tarefa reprocessada tem chave "<run>:<ETAPA>#n"; a dependente continua pedindo pela etapa.
+            return {t.idempotency_key.split(":", 1)[1].split("#", 1)[0]: t.output for t in rows}
 
     def spawn(self, specs: list[TaskSpec]) -> list[str]:
         """Expande o grafo dinamicamente (ex.: lotes de geração)."""

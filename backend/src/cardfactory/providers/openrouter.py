@@ -6,6 +6,8 @@ reserva de orçamento e autorização de gasto antes de invocar `complete`.
 
 from __future__ import annotations
 
+import json
+import logging
 import time
 from decimal import Decimal
 from typing import Any
@@ -23,6 +25,8 @@ from cardfactory.providers.base import (
     Usage,
 )
 from cardfactory.security.secrets import auth_via_proxy, get_api_key, redact
+
+log = logging.getLogger(__name__)
 
 BASE_URL = "https://openrouter.ai/api/v1"
 APP_TITLE = "CardFactory"  # cabeçalho genérico, sem dados pessoais
@@ -55,18 +59,23 @@ def classify_http_error(status: int, body: dict[str, Any] | None, resp: httpx.Re
     return ProviderError("uncertain", msg, status, ra, etype)
 
 
-def build_body(req: LLMRequest) -> dict[str, Any]:
+def build_body(req: LLMRequest, *, strict: bool = True, schema_in_prompt: bool = False) -> dict[str, Any]:
+    messages = req.messages
+    if schema_in_prompt and req.response_schema is not None:
+        note = ("Responda somente com um objeto JSON válido que siga exatamente este JSON Schema, sem texto antes "
+                "ou depois:\n" + json.dumps(req.response_schema, ensure_ascii=False))
+        messages = [*req.messages, {"role": "system", "content": note}]
     body: dict[str, Any] = {
         "model": req.model_id,
-        "messages": req.messages,
+        "messages": messages,
         "max_tokens": req.max_output_tokens,
     }
     if req.temperature is not None:
         body["temperature"] = req.temperature
-    if req.response_schema is not None:
+    if req.response_schema is not None and not schema_in_prompt:
         body["response_format"] = {
             "type": "json_schema",
-            "json_schema": {"name": req.schema_name, "strict": True, "schema": req.response_schema},
+            "json_schema": {"name": req.schema_name, "strict": strict, "schema": req.response_schema},
         }
     r = req.routing
     provider: dict[str, Any] = {
@@ -116,6 +125,11 @@ def parse_completion(data: dict[str, Any], headers: httpx.Headers | None = None)
     return LLMResult("ok", **base)
 
 
+def _grammar_too_large(data: Any) -> bool:
+    raw = json.dumps(data, ensure_ascii=False).lower() if data is not None else ""
+    return "grammar is too large" in raw or "schema is too complex" in raw
+
+
 def parse_model(m: dict[str, Any]) -> ModelInfo:
     arch = m.get("architecture") or {}
     top = m.get("top_provider") or {}
@@ -155,11 +169,11 @@ class OpenRouterProvider:
             r.raise_for_status()
             return [parse_model(m) for m in r.json().get("data", [])]
 
-    async def complete(self, req: LLMRequest) -> LLMResult:
+    async def complete(self, req: LLMRequest, *, schema_in_prompt: bool = False) -> LLMResult:
         t0 = time.monotonic()
         try:
             async with self._client(req.timeout_s) as c:
-                resp = await c.post("/chat/completions", json=build_body(req))
+                resp = await c.post("/chat/completions", json=build_body(req, schema_in_prompt=schema_in_prompt))
         except (httpx.ConnectError, httpx.ConnectTimeout) as e:
             # Falha de conexão: a requisição não chegou ao servidor.
             return LLMResult("error", error=ProviderError("pre_generation", f"conexão: {type(e).__name__}"))
@@ -172,6 +186,13 @@ class OpenRouterProvider:
             data = resp.json()
         except ValueError:
             data = None
+        if resp.status_code == 400 and not schema_in_prompt and req.response_schema is not None \
+                and _grammar_too_large(data):
+            # Alguns provedores (ex.: Anthropic) recusam esquemas grandes antes de gerar (sem cobrança), mesmo sem
+            # strict. Reenvia uma vez com o esquema no prompt; a saída continua validada localmente contra ele.
+            log.warning("esquema %s grande demais para a gramática de %s; reenviando com o esquema no prompt",
+                        req.schema_name, req.model_id)
+            return await self.complete(req, schema_in_prompt=True)
         if resp.status_code != 200:
             res = LLMResult("error" if resp.status_code in (400, 401, 402, 403, 404, 413, 422, 429, 503)
                             else "uncertain", error=classify_http_error(resp.status_code, data, resp))

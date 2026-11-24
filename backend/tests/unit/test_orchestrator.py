@@ -5,6 +5,7 @@ import pytest
 from cardfactory.db.models import Production, Project, Task
 from cardfactory.orchestrator.engine import (
     AwaitingHuman,
+    ContractViolation,
     NotImplementedStage,
     Orchestrator,
     OrchestratorError,
@@ -249,3 +250,31 @@ async def test_concurrency_limit(db, production):
     o.start(run)
     assert await o.run_until_idle(run, concurrency=3) == "COMPLETED"
     assert peak == 3
+
+
+async def test_dependent_sees_output_of_reprocessed_task(db, production):
+    calls = {"a": 0}
+
+    async def a(ctx):
+        calls["a"] += 1
+        if calls["a"] == 1:
+            raise ContractViolation("falha na primeira vez")
+        return {"v": 42}
+
+    async def b(ctx):
+        return {"got": (ctx.dep_outputs().get("a") or {}).get("v")}
+
+    o = _orch(db, {"a": a, "b": b})
+    run = o.create_run(production, "FULL_CREATION", [TaskSpec("a", "A", "a", {}), TaskSpec("b", "B", "b", {},
+                                                                                          deps=["a"])])
+    o.start(run)
+    await o.run_until_idle(run)
+    from sqlalchemy import select
+    with db.session() as s:
+        failed = s.execute(select(Task).where(Task.run_id == run, Task.stage == "A")).scalar_one()
+    o.reprocess(failed.id)
+    o.resume(run)
+    assert await o.run_until_idle(run) == "COMPLETED"
+    with db.session() as s:
+        out = s.execute(select(Task).where(Task.run_id == run, Task.stage == "B")).scalar_one().output
+    assert out == {"got": 42}

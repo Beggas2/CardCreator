@@ -34,7 +34,8 @@ LIMITATIONS = arr(STR)
 
 def enum(values: tuple[str, ...], nullable: bool = False) -> dict[str, Any]:
     if nullable:
-        return {"type": ["string", "null"], "enum": [*values, None]}
+        # anyOf em vez de type: [string, null] + enum: o validador estrito da Anthropic recusa a forma combinada.
+        return {"anyOf": [{"type": "string", "enum": list(values)}, {"type": "null"}]}
     return {"type": "string", "enum": list(values)}
 
 
@@ -66,7 +67,7 @@ EXTRACTION_V1 = obj({
         "negation_kind": enum(NEGATION_KINDS, nullable=True),
         "numeric_value": {"type": ["number", "null"]},
         "numeric_unit": NSTR,
-        "numeric_operator": {"type": ["string", "null"], "enum": ["=", "<", "≤", ">", "≥", "range", None]},
+        "numeric_operator": enum(("=", "<", "≤", ">", "≥", "range"), nullable=True),
         "conditions": arr(STR),
     })),
     "unreadable_sections": arr(obj({"section_id": STR, "reason": STR})),

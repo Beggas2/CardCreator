@@ -132,3 +132,19 @@ def test_dedup_finds_candidates_and_never_deletes(env):
     with env["db"].session() as s:
         assert s.query(Card).count() == 3
         assert s.query(SimilarityPair).count() == len(ids)
+
+
+def test_number_without_claim_unit_is_not_critical():
+    from cardfactory.cards.model import seg as _seg
+
+    c = copy.deepcopy(SAMPLES["pharmacology"])
+    claims = {"cl1": {"numeric": {"value": 0.2, "unit": "mg/kg", "operator": "="}}}
+    item = c["answer"][0]["items"][0]
+    item["segments"] = [_seg("Dias 1, 2 e 8", semantic="value", target=True)]
+    item["segments"][0]["claim_ids"] = ["cl1"]
+    hits = scan_all(c, claims)
+    assert not any(h.severity == "CRITICAL" for h in hits)
+    assert any(h.category == "TRACEABILITY" for h in hits)
+    item["segments"] = [_seg("0,5 mg/kg", semantic="value", target=True)]
+    item["segments"][0]["claim_ids"] = ["cl1"]
+    assert any(h.category == "NUMERIC_ERROR" and h.severity == "CRITICAL" for h in scan_all(c, claims))
