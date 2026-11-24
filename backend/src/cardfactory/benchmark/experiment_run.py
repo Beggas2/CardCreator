@@ -200,7 +200,7 @@ async def _one_creator(env: Env, pilot: Production, objective_ids: list[str], mo
     req = LLMRequest(model_id=model, messages=[{"role": "system", "content": composed.text},
                                                {"role": "user", "content": gen._prompt(pilot, c, cards.deck_prefix,
                                                                                        MAX_CARDS_A)}],
-                     max_output_tokens=16000, idempotency_key=f"exp:{run_id}:GENERATION:a",
+                     max_output_tokens=32000, idempotency_key=f"exp:{run_id}:GENERATION:a",
                      response_schema=GENERATION_BATCH_V1, schema_name=schema_name(composed.contract))
     t0 = time.monotonic()
     r = await env.gateway.call(req, budget_ids=[budget_id], stage="EXP_A_GENERATION",
