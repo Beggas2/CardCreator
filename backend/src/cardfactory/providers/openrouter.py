@@ -22,7 +22,7 @@ from cardfactory.providers.base import (
     ProviderError,
     Usage,
 )
-from cardfactory.security.secrets import get_api_key, redact
+from cardfactory.security.secrets import auth_via_proxy, get_api_key, redact
 
 BASE_URL = "https://openrouter.ai/api/v1"
 APP_TITLE = "CardFactory"  # cabeçalho genérico, sem dados pessoais
@@ -142,9 +142,11 @@ class OpenRouterProvider:
         self._transport = transport
 
     def _client(self, timeout: float) -> httpx.AsyncClient:
-        if not self._key:
+        headers = {"X-OpenRouter-Title": APP_TITLE}
+        if self._key:
+            headers["Authorization"] = f"Bearer {self._key}"
+        elif not auth_via_proxy():
             raise RuntimeError("OPENROUTER_API_KEY não configurada")
-        headers = {"Authorization": f"Bearer {self._key}", "X-OpenRouter-Title": APP_TITLE}
         return httpx.AsyncClient(base_url=self._base, headers=headers, timeout=timeout, transport=self._transport)
 
     async def catalog(self) -> list[ModelInfo]:

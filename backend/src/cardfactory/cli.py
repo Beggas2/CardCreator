@@ -126,6 +126,73 @@ def _experiment(args: argparse.Namespace) -> int:
     return 0
 
 
+def _etapa1(args: argparse.Namespace) -> int:
+    """Executa um passo da Etapa 1 com modelos reais. Cada passo grava o estado em data/experimento/etapa1.json."""
+    import asyncio
+    import json
+
+    from cardfactory.benchmark import experiment_run as er
+    from cardfactory.db import Database
+    from cardfactory.db.engine import make_engine
+    from cardfactory.db.migrate import upgrade
+    from cardfactory.finance.budget import FinanceService
+    from cardfactory.providers.openrouter import OpenRouterProvider
+
+    settings = load_settings(REPO_ROOT / ".env")
+    upgrade(settings.db_path)
+    db = Database(make_engine(settings.db_path))
+    path = settings.data_dir / "experimento" / "etapa1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+    def save() -> None:
+        path.write_text(json.dumps(state, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+
+    if args.passo == "orcamento":
+        if not (args.cambio and args.autorizado_por and args.limite):
+            print("Informe --cambio, --limite e --autorizado-por.", file=sys.stderr)
+            return 2
+        fin = FinanceService(db)
+        fin.set_fx_rate(args.cambio, source="cli")
+        bid = fin.create_budget("EXPERIMENT", "etapa1", args.limite, f"Etapa 1 (até R$ {args.limite})")
+        state["budget_id"] = bid
+        state["authorization_id"] = fin.authorize_spend(bid, args.limite, args.autorizado_por, args.nota or "")
+        if settings.openrouter_configured:  # catálogo com preços: base da estimativa de cada chamada (gratuito)
+            from cardfactory.providers.gateway import LLMGateway
+
+            state["catalog_models"] = asyncio.run(LLMGateway(db, fin, OpenRouterProvider()).sync_catalog())
+        save()
+        print(json.dumps(state, ensure_ascii=False, indent=2))
+        return 0
+    if not settings.openrouter_configured:
+        print("OpenRouter não configurada (OPENROUTER_API_KEY ou OPENROUTER_AUTH_VIA_PROXY=1).", file=sys.stderr)
+        return 1
+    if "budget_id" not in state:
+        print("Rode o passo 'orcamento' antes.", file=sys.stderr)
+        return 1
+    env = er.build_env(settings, db, OpenRouterProvider())
+    lst = [m.strip() for m in (args.modelos or "").split(",") if m.strip()]
+    if args.passo == "preparar":
+        ws = {"max_results": args.busca_web} if args.busca_web else None
+        out = asyncio.run(er.prepare(env, theme=args.tema, support_model=args.apoio, budget_id=state["budget_id"],
+                                     web_search=ws, web_search_price_usd=args.preco_busca))
+        state["prepare"] = out
+        state["objective_ids"] = er.pick_objectives(env, out["production_id"], args.objetivos)
+    elif args.passo == "a":
+        out = asyncio.run(er.round_a(env, pilot_production_id=state["prepare"]["production_id"],
+                                     objective_ids=state["objective_ids"], creators=lst, auditor=args.apoio,
+                                     budget_id=state["budget_id"]))
+        state.setdefault("round_a", []).append(out)
+    else:
+        out = asyncio.run(er.round_b(env, auditors=lst, budget_id=state["budget_id"],
+                                     actor=args.autorizado_por or "cli"))
+        state.setdefault("round_b", []).append(out)
+    state["budget"] = FinanceService(db).status(state["budget_id"]).as_dict()
+    save()
+    print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="cardfactory")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -143,6 +210,19 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--cambio", default=None, help="cadastra a cotação USD→BRL antes de estimar")
     e.add_argument("--sem-sincronizar", action="store_true", help="usa o catálogo já salvo")
     e.set_defaults(fn=_experiment)
+    t = sub.add_parser("etapa1", help="Etapa 1 com modelos reais: orcamento | preparar | a | b")
+    t.add_argument("passo", choices=["orcamento", "preparar", "a", "b"])
+    t.add_argument("--cambio")
+    t.add_argument("--limite", help="limite em reais")
+    t.add_argument("--autorizado-por")
+    t.add_argument("--nota")
+    t.add_argument("--tema")
+    t.add_argument("--apoio", help="modelo de pesquisa/extração/planejamento e auditor fixo")
+    t.add_argument("--modelos", help="lista separada por vírgulas (criadores na rodada A, auditores na B)")
+    t.add_argument("--objetivos", type=int, default=5)
+    t.add_argument("--busca-web", type=int, default=0, help="resultados de busca na pesquisa (0 = sem busca)")
+    t.add_argument("--preco-busca", default=None, help="US$ por busca, para a estimativa")
+    t.set_defaults(fn=_etapa1)
     args = p.parse_args(argv)
     return args.fn(args)
 

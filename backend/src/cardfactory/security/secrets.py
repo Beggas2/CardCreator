@@ -16,6 +16,11 @@ _PATTERNS = [
 REDACTED = "[REDACTED]"
 
 
+def auth_via_proxy() -> bool:
+    """A chave é injetada por um proxy de saída (ex.: segredo de rede do ambiente); o app nunca a vê."""
+    return os.environ.get("OPENROUTER_AUTH_VIA_PROXY") == "1"
+
+
 def get_api_key(name: str = KEY_ENV) -> str | None:
     value = os.environ.get(name)
     if value:

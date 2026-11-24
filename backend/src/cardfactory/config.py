@@ -72,5 +72,5 @@ def load_settings(env_file: Path | None = None) -> Settings:
         data_dir=data_dir,
         port=int(os.environ.get("CARDFACTORY_PORT", "8765")),
         worker_concurrency=int(os.environ.get("CARDFACTORY_WORKERS", "2")),
-        _has_key=bool(os.environ.get("OPENROUTER_API_KEY")),
+        _has_key=bool(os.environ.get("OPENROUTER_API_KEY")) or os.environ.get("OPENROUTER_AUTH_VIA_PROXY") == "1",
     )

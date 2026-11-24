@@ -173,3 +173,16 @@ async def test_no_key_refuses_to_call(monkeypatch):
     p = OpenRouterProvider(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=COMPLETION)))
     with pytest.raises(RuntimeError):
         await p.complete(_req())
+
+
+def test_auth_via_proxy_sends_no_key(monkeypatch):
+    from cardfactory.providers.openrouter import OpenRouterProvider
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_AUTH_VIA_PROXY", "1")
+    c = OpenRouterProvider(api_key=None)
+    c._key = None
+    assert "Authorization" not in c._client(5).headers
+    monkeypatch.delenv("OPENROUTER_AUTH_VIA_PROXY")
+    with pytest.raises(RuntimeError):
+        c._client(5)
