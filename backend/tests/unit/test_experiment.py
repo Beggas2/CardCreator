@@ -32,7 +32,7 @@ ROWS = [
 def test_selection_is_rule_based_and_filters():
     sel = {c.family: c for c in ex.select(ROWS, Decimal("16"), NOW)}
     assert set(sel) == {"OpenAI", "Anthropic", "Google", "DeepSeek"}
-    assert sel["OpenAI"].model_id == "openai/a-new"  # mais recente dentro do teto
+    assert sel["OpenAI"].model_id == "openai/a-new"  # o mais caro dentro do teto, na geração recente
     assert "openai/a-huge" in sel["OpenAI"].alternatives
     assert not sel["DeepSeek"].reasoning and sel["OpenAI"].reasoning
 

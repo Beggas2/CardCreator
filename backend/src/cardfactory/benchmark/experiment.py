@@ -21,9 +21,11 @@ FAMILIES: dict[str, tuple[str, ...]] = {
     "OpenAI": ("openai/",), "Anthropic": ("anthropic/",), "Google": ("google/",), "DeepSeek": ("deepseek/",),
     "GLM": ("z-ai/", "thudm/"), "Qwen": ("qwen/",), "Kimi": ("moonshotai/",), "MiniMax": ("minimax/",),
 }
-EXCLUDE_WORDS = ("image", "audio", "tts", "embed", "guard", "search", "vision", "-vl", "realtime", "codex", "coder")
+EXCLUDE_WORDS = ("image", "audio", "tts", "embed", "guard", "search", "vision", "-vl", "realtime", "codex", "coder",
+                 "-code", "legal", "omni", "banana", "customtools", "preview", "nano", "lite")
 MIN_CONTEXT = 64_000
 MAX_AGE_DAYS = 540
+FRESH_WINDOW_DAYS = 120  # dentro da família, só a geração recente concorre
 REASONING_FACTOR = Decimal("2")
 MILLION = Decimal(1_000_000)
 
@@ -105,22 +107,31 @@ def eligible(row: dict[str, Any], now: datetime) -> Candidate | None:
 
 
 def select(rows: list[dict[str, Any]], cap_usd_m: Decimal, now: datetime | None = None) -> list[Candidate]:
-    """Um candidato por família: o mais recente dentro do teto; os outros elegíveis ficam como alternativas."""
+    """Um candidato por família.
+
+    Concorrem os modelos de uso geral lançados até `FRESH_WINDOW_DAYS` antes do mais novo da família e dentro do
+    teto. Entre eles vence o de maior preço de saída (o catálogo não informa qualidade; o preço é o indicador
+    disponível de que é o modelo principal da geração, não a versão reduzida). Empate: o mais recente.
+    """
     now = now or datetime.now(UTC)
     by_family: dict[str, list[Candidate]] = {}
     for row in rows:
         c = eligible(row, now)
         if c:
             by_family.setdefault(c.family, []).append(c)
+    oldest = datetime.min.replace(tzinfo=UTC)
     out = []
     for fam in FAMILIES:
-        pool = sorted(by_family.get(fam, []), key=lambda c: (c.created or datetime.min.replace(tzinfo=UTC),
-                                                            c.completion_usd_m), reverse=True)
-        within = [c for c in pool if c.completion_usd_m <= cap_usd_m]
+        pool = by_family.get(fam, [])
+        newest = max((c.created or oldest for c in pool), default=oldest)
+        fresh = [c for c in pool if (c.created or oldest) >= newest - timedelta(days=FRESH_WINDOW_DAYS)]
+        within = sorted((c for c in fresh if c.completion_usd_m <= cap_usd_m),
+                        key=lambda c: (c.completion_usd_m, c.created or oldest), reverse=True)
         if not within:
             continue
         pick = within[0]
-        pick.alternatives = [c.model_id for c in pool if c is not pick][:4]
+        pick.alternatives = [c.model_id for c in sorted(fresh, key=lambda c: c.created or oldest, reverse=True)
+                             if c is not pick][:4]
         out.append(pick)
     return out
 
@@ -151,10 +162,10 @@ def plan(rows: list[dict[str, Any]], *, budget_brl: Decimal, fx_rate: Decimal | 
     caps = {**DEFAULT_CAPS_USD, **(caps or {})}
     creators = select(rows, caps["creator"], now)
     auditors = select(rows, caps["auditor_scientific"], now)
-    # Auditor fixo da Rodada A e pesquisador: o mais barato entre os auditores com raciocínio, para não
-    # favorecer a família de nenhum criador por preço alto; a escolha é exibida e pode ser trocada.
-    reasoning_auditors = [x for x in auditors if x.reasoning] or auditors
-    fixed = min(reasoning_auditors, key=lambda x: x.completion_usd_m, default=None)
+    # Auditor fixo da Rodada A e pesquisador: o mais barato entre os modelos principais (saída ≥ 25% do teto),
+    # para não gastar a triagem no juiz; a escolha é exibida e pode ser trocada.
+    main_tier = [x for x in auditors if x.completion_usd_m >= caps["auditor_scientific"] / 4] or auditors
+    fixed = min(main_tier, key=lambda x: x.completion_usd_m, default=None)
     cost = estimate(creators, auditors, fixed, fixed)
     total_usd = sum(cost.values(), Decimal(0))
     rounds = {k: {"usd": _s(v), "brl": _s(usd_to_brl(v, fx_rate, fx_margin)) if fx_rate else None}
