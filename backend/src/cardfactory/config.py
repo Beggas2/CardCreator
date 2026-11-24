@@ -6,6 +6,9 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# backend/src/cardfactory/config.py → raiz do repositório
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _load_dotenv(path: Path) -> None:
     if not path.is_file():
@@ -33,6 +36,14 @@ class Settings:
     @property
     def db_url(self) -> str:
         return f"sqlite:///{self.db_path.as_posix()}"
+
+    @property
+    def prompts_dir(self) -> Path:
+        return Path(os.environ.get("CARDFACTORY_PROMPTS_DIR", REPO_ROOT / "prompts"))
+
+    @property
+    def normative_dir(self) -> Path:
+        return REPO_ROOT / "docs" / "normative"
 
     @property
     def openrouter_configured(self) -> bool:
