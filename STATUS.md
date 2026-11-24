@@ -1,5 +1,26 @@
 # STATUS
 
+## Fase 3 — concluída (24/11/2026)
+
+- **Implementado**:
+  - Contrato card.v2 (12 layouts, 12 tipos cognitivos A–L, três camadas) e generation_batch.v1 em JSON Schema estrito, com regras determinísticas (essencial obrigatório, sem alvo no complemento, regra de combinação em critérios, HTML do modelo recusado).
+  - Renderizador puro card → HTML: cor por semântica, negrito só em alvo de recuperação (AMB-06), tokens de tipografia e espaçamento, alinhamento por layout, tabelas responsivas, nunca fixa fundo nem cria rótulos automáticos.
+  - Paleta clara equivalente só na prévia (AMB-01), com contraste ≥ 4,5:1 conferido em teste.
+  - Validador de HTML (C§38.4 ampliado: allowlist, eventos, CSS proibido, paleta, mídia externa) e alertas pedagógicos (C§38.2) com ciclo aberto/corrigido/justificado; erros bloqueiam e não podem ser justificados.
+  - Versões append-only, rollback como nova versão, diff, HTML derivado registrado, operações (R§37) e mídia só com licença e direitos verificados.
+  - Exportação versionada nos três formatos (principal com GUID, sem GUID, simplificado), releitura campo a campo, validador de arquivo, diff com a exportação anterior, manifesto, pendências e mídia. Prévias sem revisão saem rotuladas PREVIA_NAO_REVISADA.
+  - Etapa GENERATION real: reserva de objetivos, só cita afirmações/trechos/fontes recebidos, lote reduzido ao meio em truncamento, retomada sem duplicar cards.
+  - Telas Cards (prévia escuro/claro, celular/desktop, aprovação mínima, edição, versões, justificativas), Galeria visual e Exportação.
+- **Efetivamente testado**: 217 testes pytest sem rede (mais 1 opcional) (inclui regressões técnicas C§40 itens 1–9) e smoke Playwright de todas as telas, com verificação de rolagem horizontal em 412 px. Importação real numa coleção Anki descartável (pacote `anki` 26.09.4) passou; esse teste é opcional e fica pulado quando o pacote não está instalado.
+- **Decisão resolvida**: AMB-08. GUID vazio cria nota nova no Anki; exportamos GUID vazio e a tag `cf::<card_key>` para reconciliar.
+- **Limitações**:
+  - Cards reais dependem do modelo; até agora só o simulado gerou cards (conteúdo [SIMULADO]).
+  - A aprovação na tela Cards é mínima; a mesa de revisão com motivos tipificados é da Fase 5.
+  - Cards legados importados ainda não têm conversor para card.v2 (Fase 4).
+  - Auditorias científica, pedagógica e de cobertura continuam simplificadas até a Fase 4.
+- **Custos**: R$ 0,00.
+- **Próxima etapa**: Fase 4, auditoria (científica, pedagógica, cobertura, segurança), correção e deduplicação.
+
 ## Fase 2 — concluída (24/11/2026)
 
 - **Implementado**:

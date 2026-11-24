@@ -173,3 +173,41 @@ def test_cli_backup_and_check(tmp_path, monkeypatch, capsys):
     assert main(["backup"]) == 0
     assert len(list((tmp_path / "backups").glob("*.sqlite"))) == 1
     assert "ERRO" not in capsys.readouterr().out
+
+
+def test_cards_render_and_export_endpoints(client):
+    from cardfactory.cards.samples import SAMPLES
+    samples = client.get("/api/render/samples").json()
+    assert len(samples) == 12 and all(s["rendered"]["dark"]["back"] and s["rendered"]["light"]["back"]
+                                      for s in samples)
+    pal = client.get("/api/render/palettes").json()
+    assert all(v >= 4.5 for p in pal.values() for v in p["contrast"].values())
+    bad = client.post("/api/render", json={"card": {**SAMPLES["direct"], "answer": []}}).json()
+    assert bad["ok"] is False and bad["errors"]
+    pid = client.post("/api/projects", json={"name": "Cards"}).json()["id"]
+    assert client.post("/api/cards", json={"project_id": pid, "card": SAMPLES["list"], "author": ""}) \
+        .status_code == 400
+    r = client.post("/api/cards", json={"project_id": pid, "card": {**SAMPLES["list"], "answer": []},
+                                        "author": "Ana"})
+    assert r.status_code == 400 and r.json()["errors"]
+    cid = client.post("/api/cards", json={"project_id": pid, "card": SAMPLES["list"], "author": "Ana"}).json()["id"]
+    edited = {**SAMPLES["list"], "minimal_answer": "A, B e C (v2)"}
+    assert client.post(f"/api/cards/{cid}/versions", json={"card": edited, "author": "Ana"}).json()["version_no"] == 2
+    assert client.post(f"/api/cards/{cid}/rollback", json={"version_no": 1, "author": "Ana", "reason": "x"}) \
+        .json()["version_no"] == 3
+    got = client.get(f"/api/cards/{cid}").json()
+    assert got["state"] == "DRAFT" and len(got["versions"]) == 3 and got["rendered"]["light"]["front"]
+    assert "editada" not in client.get(f"/api/cards/{cid}/diff", params={"a": 1, "b": 3}).json()["unified"]
+    blocked = client.post("/api/exports", json={"project_id": pid}).json()
+    assert blocked["state"] == "BLOCKED"
+    assert client.post(f"/api/cards/{cid}/state", json={"state": "HUMAN_APPROVED", "author": "Ana",
+                                                        "reason": ""}).status_code == 400
+    client.post(f"/api/cards/{cid}/state", json={"state": "HUMAN_APPROVED", "author": "Ana", "reason": "ok"})
+    ex = client.post("/api/exports", json={"project_id": pid, "author": "Ana"}).json()
+    assert ex["state"] == "READY" and ex["version_label"] == "v2"
+    deck = next(f["name"] for f in ex["files"] if f["kind"] == "DECK")
+    f = client.get(f"/api/exports/{ex['export_id']}/files/{deck}")
+    assert f.status_code == 200 and f.content.startswith(b"#separator:tab")
+    assert client.get(f"/api/exports/{ex['export_id']}/files/..%2F..%2Fcardfactory.sqlite").status_code in (400, 404)
+    assert [e["state"] for e in client.get("/api/exports", params={"project_id": pid}).json()] == ["READY",
+                                                                                                  "BLOCKED"]

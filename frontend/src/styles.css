@@ -105,3 +105,30 @@ table.compact td, table.compact th { padding: 3px 6px; }
 tr.selected td { background: var(--panel-2); }
 .claim { padding: 8px 0; border-bottom: 1px solid var(--line); }
 blockquote { margin: 6px 0 0 0; padding: 6px 10px; border-left: 3px solid var(--ok); background: var(--panel-2); border-radius: 4px; }
+
+/* Fase 3: prévia de cards, galeria, exportação */
+button.tlink { background: none; border: none; color: var(--accent); padding: 0 4px; text-decoration: underline; cursor: pointer; }
+button.tlink:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+.preview { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.preview-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.preview iframe { border: 1px solid var(--line); border-radius: 8px; display: block; }
+.seg { display: inline-flex; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; }
+.seg button.on { background: var(--panel-2); border-color: var(--accent); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: 16px; }
+.findings { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.findings li { border-left: 3px solid var(--warn); padding-left: 8px; }
+.findings li.f-error { border-left-color: var(--bad); }
+.f-level { font-weight: 600; margin-right: 6px; }
+.swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; border: 1px solid var(--line); }
+.stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.grow { flex: 1; min-width: 200px; }
+label.check { flex-direction: row; align-items: center; gap: 6px; }
+ul.plain { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+table.clickable tbody tr { cursor: pointer; }
+.legacy pre { white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; font-size: 12px; }
+textarea.code { min-height: 200px; }
+.split.wide { grid-template-columns: minmax(320px, 1fr) minmax(380px, 1.4fr); }
+@media (max-width: 800px) { .split.wide { grid-template-columns: 1fr; } }

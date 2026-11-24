@@ -1,5 +1,5 @@
 // Smoke test da interface: sobe o backend com dados temporários e provedor simulado,
-// percorre Painel, Monitor (execução simulada até a revisão humana), Prompts e Orçamento.
+// percorre todas as telas: execução simulada até a revisão humana, cards, exportação, galeria, prompts e orçamento.
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -76,6 +76,39 @@ try {
   });
   await page.getByText("2 notas · 2 novas").first().waitFor();
   await page.screenshot({ path: join(shots, "7-importacao.png"), fullPage: true });
+
+  // Fase 3: cards, prévia, aprovação humana mínima, exportação e galeria visual.
+  await page.getByRole("link", { name: "Cards", exact: true }).click();
+  await page.getByText("[SIMULADO] Pergunta 1").first().click();
+  const frame = page.frameLocator("iframe").first();
+  await frame.getByText("[SIMULADO] Pergunta 1").waitFor();
+  await page.getByRole("button", { name: "Claro" }).first().click();
+  const bg = await page.locator("iframe").first().evaluate((f) => getComputedStyle(f.contentDocument.body).backgroundColor);
+  if (bg !== "rgb(255, 255, 255)") throw new Error("prévia clara não aplicou fundo branco: " + bg);
+  await page.getByLabel("Seu nome").fill("Revisora de teste");
+  await page.getByLabel("Motivo").fill("conferido no smoke");
+  await page.getByRole("button", { name: "Aprovar para exportação" }).click();
+  await page.getByText("aprovado").first().waitFor();
+  await page.screenshot({ path: join(shots, "8-cards.png"), fullPage: true });
+
+  await page.getByRole("link", { name: "Exportação" }).click();
+  await page.getByRole("button", { name: "Exportar" }).click();
+  await page.getByText("pronta").first().waitFor();
+  await page.getByRole("link", { name: /DECK_anki_tsv_v2_v1\.txt/ }).waitFor();
+  await page.screenshot({ path: join(shots, "9-exportacao.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 412, height: 900 });
+  await page.getByRole("link", { name: "Galeria visual" }).click();
+  await page.getByText("L · Integração").waitFor();
+  await page.waitForFunction(() => document.querySelectorAll("iframe").length === 12);
+  await page.waitForTimeout(300);
+  const overflow = await page.evaluate(() => [...document.querySelectorAll("iframe")].map((f) => {
+    const d = f.contentDocument.documentElement;
+    return { title: f.title, over: d.scrollWidth - d.clientWidth };
+  }).filter((x) => x.over > 0));
+  if (overflow.length) throw new Error("rolagem horizontal em largura de celular: " + JSON.stringify(overflow));
+  await page.screenshot({ path: join(shots, "10-galeria-celular.png"), fullPage: true });
+  await page.setViewportSize({ width: 1280, height: 860 });
 
   await page.getByRole("link", { name: "Prompts" }).click();
   await page.getByText("Todos os papéis contêm os requisitos obrigatórios").waitFor();

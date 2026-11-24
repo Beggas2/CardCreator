@@ -236,6 +236,15 @@ class CardEditIn(BaseModel):
     objective_change: str = "EQUIVALENT"
 
 
+HUMAN_STATES = {"HUMAN_APPROVED", "QUARANTINE", "REJECTED", "PENDING_HUMAN"}
+
+
+class CardStateIn(BaseModel):
+    state: str
+    author: str
+    reason: str
+
+
 class RollbackIn(BaseModel):
     version_no: int
     author: str
@@ -607,6 +616,18 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
     def card_edit(card_id: str, body: CardEditIn):
         return cs.new_version(card_id, body.card, kind=body.kind, author_type="HUMAN", actor=body.author,
                               note=body.note, objective_change=body.objective_change)
+
+    @app.post("/api/cards/{card_id}/state")
+    def card_state(card_id: str, body: CardStateIn):
+        """Decisão humana mínima (aprovar, quarentena, rejeitar). A mesa de revisão completa chega na Fase 5."""
+        if body.state not in HUMAN_STATES:
+            raise HTTPException(400, f"estado deve ser um de {sorted(HUMAN_STATES)}")
+        if not body.author.strip() or not body.reason.strip():
+            raise HTTPException(400, "autor e motivo são obrigatórios")
+        if body.state == "HUMAN_APPROVED" and cs.get(card_id)["schema_version"] != "2.1":
+            raise HTTPException(400, "card legado precisa ser convertido para card.v2 antes da aprovação")
+        cs.set_state(card_id, body.state, actor=body.author, actor_type="HUMAN", reason=body.reason)
+        return {"ok": True}
 
     @app.post("/api/cards/{card_id}/rollback")
     def card_rollback(card_id: str, body: RollbackIn):

@@ -49,6 +49,15 @@ Regras do schema (determinísticas):
 - Bloco `criteria` exige `combination_rule` (C§19.2).
 - Sem campos de confiança numérica (AUD-006).
 
+Refinamentos da Fase 3 (schema em `backend/src/cardfactory/contracts/schemas.py`):
+- O modelo emite `CARD_V2_MODEL`; o sistema acrescenta `schema_version`, `card_key`, `anki_guid`, `images` e `validation_status`.
+- Segmentos têm `italic` (só nomenclatura científica, termos estrangeiros e convenções, C§18.3).
+- Itens têm `segments` (blocos de texto) ou `cells` (linhas de `table`/`comparison`); blocos tabulares têm `header` opcional.
+- Regra de combinação: `combination_rule` + `combination_n` (para `at_least_n`) + `combination_text` (obrigatório em `major_minor`). O renderizador mostra a regra no bloco.
+- Cada card traz `evidence_span_ids` e `media_requests`; mídia só vira `images` depois de obtida com direitos verificados (VIS-016).
+- `generation_batch.v1` = `{cards: [card.v2], unverified_claims: [{text, objective_id, reason}], limitations}`.
+- Exportação: notas novas vão com GUID vazio (testado no Anki 26.09: o Anki gera o GUID) e recebem a tag `cf::<card_key>` para reconciliação.
+
 ## 2. Saídas dos papéis de IA
 
 | Papel | Contrato de saída | Campos essenciais |
