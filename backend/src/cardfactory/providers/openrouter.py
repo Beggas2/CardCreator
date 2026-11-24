@@ -61,7 +61,9 @@ def classify_http_error(status: int, body: dict[str, Any] | None, resp: httpx.Re
 
 def build_body(req: LLMRequest, *, strict: bool = True, schema_in_prompt: bool = False) -> dict[str, Any]:
     messages = req.messages
-    if schema_in_prompt and req.response_schema is not None:
+    # O esquema vai também no prompt: há provedores que aceitam response_format mas o ignoram em silêncio
+    # (a resposta sai num formato genérico que passa vazia). A saída continua validada localmente.
+    if req.response_schema is not None:
         note = ("Responda somente com um objeto JSON válido que siga exatamente este JSON Schema, sem texto antes "
                 "ou depois:\n" + json.dumps(req.response_schema, ensure_ascii=False))
         messages = [*req.messages, {"role": "system", "content": note}]
@@ -130,6 +132,11 @@ def _grammar_too_large(data: Any) -> bool:
     return "grammar is too large" in raw or "schema is too complex" in raw
 
 
+def _no_structured_endpoint(data: Any) -> bool:
+    raw = json.dumps(data, ensure_ascii=False).lower() if data is not None else ""
+    return "no endpoints found that can handle the requested parameters" in raw
+
+
 def parse_model(m: dict[str, Any]) -> ModelInfo:
     arch = m.get("architecture") or {}
     top = m.get("top_provider") or {}
@@ -186,11 +193,12 @@ class OpenRouterProvider:
             data = resp.json()
         except ValueError:
             data = None
-        if resp.status_code == 400 and not schema_in_prompt and req.response_schema is not None \
-                and _grammar_too_large(data):
+        if not schema_in_prompt and req.response_schema is not None and (
+                (resp.status_code == 400 and _grammar_too_large(data))
+                or (resp.status_code == 404 and _no_structured_endpoint(data))):
             # Alguns provedores (ex.: Anthropic) recusam esquemas grandes antes de gerar (sem cobrança), mesmo sem
             # strict. Reenvia uma vez com o esquema no prompt; a saída continua validada localmente contra ele.
-            log.warning("esquema %s grande demais para a gramática de %s; reenviando com o esquema no prompt",
+            log.warning("esquema %s recusado como response_format por %s; reenviando só com o esquema no prompt",
                         req.schema_name, req.model_id)
             return await self.complete(req, schema_in_prompt=True)
         if resp.status_code != 200:

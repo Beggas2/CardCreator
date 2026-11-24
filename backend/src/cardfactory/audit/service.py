@@ -45,6 +45,11 @@ def latest_version(s, card_id: str) -> CardVersion:
 
 def card_claim_ids(s, v: CardVersion) -> list[str]:
     ids = [c["claim_id"] for c in v.content.get("claims", [])] if isinstance(v.content.get("claims"), list) else []
+    # Afirmações citadas só nos trechos (sem constar na lista "claims") também contam para a auditoria.
+    for b in v.content.get("answer") or []:
+        for it in b.get("items") or []:
+            for sg in (it.get("segments") or []) + [x for c in it.get("cells") or [] for x in c.get("segments") or []]:
+                ids += [i for i in sg.get("claim_ids") or [] if isinstance(i, str)]
     ids += list(s.execute(select(Claim.id).where(Claim.card_version_id.in_(
         select(CardVersion.id).where(CardVersion.card_id == v.card_id)))).scalars())
     return list(dict.fromkeys(ids))

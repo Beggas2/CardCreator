@@ -210,3 +210,28 @@ async def test_grammar_too_large_retries_with_schema_in_prompt(monkeypatch):
     r = await p.complete(LLMRequest(model_id="m", messages=[], max_output_tokens=10, idempotency_key="k",
                                     response_schema={"type": "object"}, schema_name="s"))
     assert seen == [True, False] and r.status == "ok"
+
+
+async def test_no_structured_endpoint_retries_with_schema_in_prompt():
+    import json as js
+
+    import httpx as hx
+
+    from cardfactory.providers.base import LLMRequest
+    from cardfactory.providers.openrouter import OpenRouterProvider
+
+    seen = []
+
+    def handler(request):
+        body = js.loads(request.content)
+        seen.append(("response_format" in body, "JSON Schema" in body["messages"][-1]["content"]))
+        if "response_format" in body:
+            return hx.Response(404, json={"error": {"code": 404, "message": "No endpoints found that can handle "
+                                                                            "the requested parameters."}})
+        return hx.Response(200, json={"id": "gen-1", "model": "m", "choices": [
+            {"finish_reason": "stop", "message": {"content": "{}"}}], "usage": {}})
+
+    p = OpenRouterProvider(api_key="k", transport=hx.MockTransport(handler))
+    r = await p.complete(LLMRequest(model_id="m", messages=[], max_output_tokens=10, idempotency_key="k",
+                                    response_schema={"type": "object"}, schema_name="s"))
+    assert seen == [(True, True), (False, True)] and r.status == "ok"

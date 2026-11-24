@@ -52,7 +52,7 @@ from cardfactory.prompts.registry import wrap_untrusted
 from cardfactory.providers.base import LLMRequest
 from cardfactory.validation.html import normalized_text
 
-AUDIT_BATCH = 6
+AUDIT_BATCH = 3
 PLACEHOLDER_RE = re.compile(r"^(exemplo|example|lorem ipsum|placeholder)\b", re.IGNORECASE)
 CORRECTION_BATCH = 2  # cada correção devolve o card inteiro: lotes de 6 truncavam em 16 mil tokens
 MAX_CORRECTIONS = 2
@@ -220,7 +220,8 @@ async def _scientific(svc: ResearchServices, ctx: TaskContext, prd: Production, 
         user = (f"Tema: {prd.theme}\nAudite cientificamente cada afirmação dos cards abaixo. Use apenas as "
                 f"evidências fornecidas; se forem insuficientes, peça nova pesquisa.\n\n"
                 + "\n\n".join(_card_block(c) for c in batch))
-        parsed, call_id = await _call(svc, ctx, "auditor_scientific", SCI_AUDIT_V1, user, f"{key}.b{i}")
+        parsed, call_id = await _call(svc, ctx, "auditor_scientific", SCI_AUDIT_V1, user, f"{key}.b{i}",
+                                      max_tokens=24000)
         by_key = {c["key"]: c for c in batch}
         for c in batch:
             aid = svc_audit_record(aud, "SCIENTIFIC", prd.id, c, call_id,
