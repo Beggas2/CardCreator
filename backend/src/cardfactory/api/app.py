@@ -254,9 +254,12 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
                      "created_at": e.created_at.isoformat()} for e in s.execute(qy).scalars()]
 
     @app.get("/api/calls")
-    def calls(limit: int = 100):
+    def calls(limit: int = 100, run_id: str | None = None):
         with db.session() as s:
-            rows = s.execute(select(LLMCall).order_by(LLMCall.created_at.desc()).limit(min(limit, 500))).scalars()
+            qy = select(LLMCall).order_by(LLMCall.created_at.desc()).limit(min(limit, 500))
+            if run_id:
+                qy = qy.join(Task, Task.id == LLMCall.task_id).where(Task.run_id == run_id)
+            rows = s.execute(qy).scalars()
             return [{"id": c.id, "task_id": c.task_id, "stage": c.stage, "provider": c.provider,
                      "requested_model": c.requested_model, "served_model": c.served_model, "state": c.state,
                      "model_mismatch": c.model_mismatch, "tokens_in": c.tokens_in, "tokens_out": c.tokens_out,

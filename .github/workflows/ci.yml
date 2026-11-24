@@ -1,0 +1,53 @@
+name: CI
+
+# Somente provedor simulado: nenhuma chave e nenhuma chamada paga na CI.
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - run: uv run cardfactory check
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npm run build
+      - name: Interface compilada no repositório está atualizada
+        run: git diff --exit-code -- dist || (echo "Rode 'npm run build' em frontend/ e faça commit de dist/" && exit 1)
+      - run: npx playwright install --with-deps chromium
+      - run: uv sync --locked --project ../backend
+      - run: npm run smoke

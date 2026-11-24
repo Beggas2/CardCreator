@@ -7,10 +7,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.egg-info/
-dist/
+backend/dist/
 build/
 node_modules/
-frontend/dist/
 data/
 *.sqlite
 *.sqlite-wal
@@ -19,3 +18,4 @@ data/
 htmlcov/
 playwright-report/
 test-results/
+*.tsbuildinfo

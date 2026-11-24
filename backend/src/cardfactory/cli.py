@@ -40,6 +40,29 @@ def _migrate(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _backup(_args: argparse.Namespace) -> int:
+    """Cópia consistente do banco (API de backup do SQLite; funciona com o app aberto)."""
+    import sqlite3
+    from datetime import datetime
+
+    settings = load_settings(REPO_ROOT / ".env")
+    if not settings.db_path.is_file():
+        print("Nenhum banco para copiar.", file=sys.stderr)
+        return 1
+    dest_dir = settings.data_dir / "backups"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"cardfactory-{datetime.now():%Y%m%d-%H%M%S}.sqlite"
+    src = sqlite3.connect(settings.db_path)
+    dst = sqlite3.connect(dest)
+    try:
+        src.backup(dst)
+    finally:
+        dst.close()
+        src.close()
+    print(f"Backup gravado em {dest}")
+    return 0
+
+
 def _check(_args: argparse.Namespace) -> int:
     """Verificações locais sem rede: hashes normativos e cobertura de prompts."""
     import hashlib
@@ -76,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--open", action="store_true", help="abre o navegador")
     s.set_defaults(fn=_serve)
     sub.add_parser("migrate", help="aplica migrações do banco").set_defaults(fn=_migrate)
+    sub.add_parser("backup", help="copia o banco para data/backups").set_defaults(fn=_backup)
     sub.add_parser("check", help="verifica documentos normativos e prompts").set_defaults(fn=_check)
     args = p.parse_args(argv)
     return args.fn(args)

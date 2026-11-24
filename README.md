@@ -37,13 +37,18 @@ Mesmo com chave, **nenhuma chamada paga acontece sem uma autorização de gasto 
 cd backend
 uv run pytest            # unitários + integração; nunca acessam a rede nem gastam créditos
 uv run ruff check .
-cd ../frontend && npm ci && npm run build && npx playwright test
+uv run cardfactory check # hashes dos documentos normativos + cobertura de requisitos nos prompts
+cd ../frontend
+npm ci && npm run build  # a interface compilada (frontend/dist) fica no repositório
+npm run smoke            # Playwright: sobe o app com o simulado e percorre as telas
 ```
+
+A interface compilada é versionada para que o uso no Windows exija apenas o `uv`; Node.js só é necessário para alterar a interface.
 
 ## Recuperação de falhas
 
 - O banco usa SQLite em modo WAL. Ao reiniciar, tarefas interrompidas são retomadas; chamadas cujo resultado é incerto ficam em `UNCERTAIN` e são reconciliadas antes de qualquer repetição.
-- Backup: copie `data/` com o app fechado, ou use `uv run cardfactory backup`.
+- Backup: `uv run --project backend cardfactory backup` grava uma cópia consistente em `data/backups/` (funciona com o app aberto).
 
 ## Documentação
 

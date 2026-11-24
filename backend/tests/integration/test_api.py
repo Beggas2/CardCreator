@@ -155,3 +155,13 @@ def test_cli_refuses_public_bind():
     assert main(["serve", "--host", "0.0.0.0"]) == 2
 
 
+
+
+def test_cli_backup_and_check(tmp_path, monkeypatch, capsys):
+    from cardfactory.cli import main
+    monkeypatch.setenv("CARDFACTORY_DATA_DIR", str(tmp_path))
+    assert main(["migrate"]) == 0
+    assert main(["check"]) == 0
+    assert main(["backup"]) == 0
+    assert len(list((tmp_path / "backups").glob("*.sqlite"))) == 1
+    assert "ERRO" not in capsys.readouterr().out
