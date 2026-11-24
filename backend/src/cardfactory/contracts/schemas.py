@@ -102,10 +102,78 @@ PLAN_V1 = obj({
     "limitations": LIMITATIONS,
 })
 
+# ------------------------------------------------------------------ card.v2 (CONTRACTS.md §1)
+COGNITIVE_TYPES = tuple("ABCDEFGHIJKL")
+LAYOUTS = ("direct", "list", "criteria", "comparison", "score", "mechanism", "algorithm", "pharmacology", "case",
+           "negative", "image", "integration")
+SEMANTICS = ("concept", "conduct", "diagnosis", "value", "risk", "neutral", "complement", "reference", "divergence")
+ROLES = ("essential", "understanding", "complement")
+BLOCKS = ("paragraph", "list", "ordered_list", "table", "comparison", "sequence", "formula")
+COMBINATION_RULES = ("all", "any", "at_least_n", "major_minor", "mutually_exclusive")
+FRONT_EMPHASIS = ("none", "retrieval_object")
+
+SEGMENT = obj({
+    "text": STR,
+    "semantic": enum(SEMANTICS),
+    "retrieval_target": {"type": "boolean"},
+    "italic": {"type": "boolean"},  # só nomenclatura científica, termos estrangeiros e convenções (C§18.3)
+    "claim_ids": arr(STR),
+})
+ITEM = obj({
+    "segments": arr(SEGMENT),             # blocos de texto (paragraph, list, ordered_list, sequence, formula)
+    "cells": arr(obj({"segments": arr(SEGMENT)})),  # blocos tabulares (table, comparison): uma linha
+})
+BLOCK = obj({
+    "role": enum(ROLES),
+    "block": enum(BLOCKS),
+    "title": NSTR,
+    "header": {"type": ["array", "null"], "items": STR},   # cabeçalho de colunas (table, comparison)
+    "items": arr(ITEM, minItems=1),
+    "combination_rule": enum(COMBINATION_RULES, nullable=True),
+    "combination_n": {"type": ["integer", "null"], "minimum": 1},
+    "combination_text": NSTR,
+})
+CARD_V2_MODEL = obj({
+    "objective_ids": arr(STR),
+    "deck_path": arr(STR, minItems=1),
+    "cognitive_type": enum(COGNITIVE_TYPES),
+    "layout": enum(LAYOUTS),
+    "front": obj({"segments": arr(obj({"text": STR, "emphasis": enum(FRONT_EMPHASIS), "italic": {"type": "boolean"}}),
+                                  minItems=1),
+                  "align": enum(("auto", "center", "left"))}),
+    "minimal_answer": STR,
+    "answer": arr(BLOCK, minItems=1),
+    "short_reference": {"type": ["object", "null"], "additionalProperties": False,
+                        "properties": {"source_ids": arr(STR), "display": STR},
+                        "required": ["source_ids", "display"]},
+    "tags": arr(STR),
+    "claims": arr(obj({"claim_id": STR, "text": STR, "component": enum(CLAIM_COMPONENTS),
+                       "criticality": enum(CRITICALITY), "population": STR})),
+    "evidence_span_ids": arr(STR),
+    "media_requests": arr(obj({"finding": STR, "desired_source": STR, "purpose": STR})),
+    "limitations": LIMITATIONS,
+})
+SYSTEM_FIELDS = {
+    "schema_version": {"type": "string", "const": "2.1"},
+    "card_key": STR,
+    "anki_guid": NSTR,
+    "images": arr(obj({"file": STR, "alt": STR, "side": enum(("front", "back"))})),
+    "validation_status": enum(("pending", "valid", "invalid")),
+}
+CARD_V2 = obj({**SYSTEM_FIELDS, **CARD_V2_MODEL["properties"]})
+
+GENERATION_BATCH_V1 = obj({
+    "cards": arr(CARD_V2_MODEL),
+    "unverified_claims": arr(obj({"text": STR, "objective_id": STR, "reason": STR})),
+    "limitations": LIMITATIONS,
+})
+
 CONTRACTS: dict[str, dict[str, Any]] = {
     "research_result.v1": RESEARCH_RESULT_V1,
     "extraction.v1": EXTRACTION_V1,
     "plan.v1": PLAN_V1,
+    "card.v2": CARD_V2,
+    "generation_batch.v1": GENERATION_BATCH_V1,
 }
 
 

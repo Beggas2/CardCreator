@@ -17,6 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
+from cardfactory.cards.model import CardError, structural_errors
+from cardfactory.cards.samples import SAMPLES
+from cardfactory.cards.service import CardService, CardServiceError
 from cardfactory.config import REPO_ROOT, Settings, load_settings
 from cardfactory.db import Database, make_engine
 from cardfactory.db.migrate import upgrade
@@ -31,6 +34,7 @@ from cardfactory.db.models import (
     Run,
     Task,
 )
+from cardfactory.export.service import Exporter, ExportError
 from cardfactory.finance.budget import BudgetError, FinanceService
 from cardfactory.importers.anki import AnkiImporter
 from cardfactory.importers.questions import import_questions
@@ -43,8 +47,11 @@ from cardfactory.prompts.registry import PromptError, PromptRegistry
 from cardfactory.providers.base import LLMProvider
 from cardfactory.providers.gateway import LLMGateway
 from cardfactory.providers.mock import MockProvider
+from cardfactory.render.palette import PALETTES, contrast
+from cardfactory.render.renderer import render
 from cardfactory.security.fetch import FetchBlockedError, FetchFailedError, safe_fetch
 from cardfactory.security.secrets import install_log_redaction
+from cardfactory.validation.card_checks import check_card
 
 log = logging.getLogger(__name__)
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "testserver"}
@@ -59,6 +66,8 @@ class AppState:
     providers: dict[str, LLMProvider]
     library: Library
     knowledge: Knowledge
+    cards: CardService | None = None
+    exporter: Exporter | None = None
     fetcher: Any = None  # injetável nos testes; padrão: download seguro
     gateways: dict[str, LLMGateway] = field(default_factory=dict)
     running: dict[str, asyncio.Task] = field(default_factory=dict)
@@ -102,6 +111,8 @@ def create_app(settings: Settings | None = None, providers: dict[str, LLMProvide
             from cardfactory.providers.openrouter import OpenRouterProvider
             providers["openrouter"] = OpenRouterProvider()
     st = AppState(settings, db, finance, registry, providers, Library(db, settings.data_dir / "blobs"), Knowledge(db))
+    st.cards = CardService(db, settings.media_dir, deck_prefix=settings.deck_prefix)
+    st.exporter = Exporter(db, settings.exports_dir, settings.media_dir, deck_prefix=settings.deck_prefix)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -144,6 +155,18 @@ def create_app(settings: Settings | None = None, providers: dict[str, LLMProvide
 
     @app.exception_handler(PromptError)
     async def prompt_err(_r, e: PromptError):
+        return JSONResponse({"detail": str(e)}, status_code=400)
+
+    @app.exception_handler(CardError)
+    async def card_err(_r, e: CardError):
+        return JSONResponse({"detail": str(e), "errors": e.errors}, status_code=400)
+
+    @app.exception_handler(CardServiceError)
+    async def card_svc_err(_r, e: CardServiceError):
+        return JSONResponse({"detail": str(e)}, status_code=400)
+
+    @app.exception_handler(ExportError)
+    async def export_err(_r, e: ExportError):
         return JSONResponse({"detail": str(e)}, status_code=400)
 
     _routes(app, st)
@@ -197,6 +220,45 @@ class ProductionIn(BaseModel):
 
 class SkipIn(BaseModel):
     reason: str
+
+
+class CardIn(BaseModel):
+    project_id: str
+    card: dict[str, Any]
+    author: str
+
+
+class CardEditIn(BaseModel):
+    card: dict[str, Any]
+    author: str
+    note: str = ""
+    kind: str = "UPDATE_CONTENT"
+    objective_change: str = "EQUIVALENT"
+
+
+class RollbackIn(BaseModel):
+    version_no: int
+    author: str
+    reason: str
+
+
+class JustifyIn(BaseModel):
+    justification: str
+    author: str
+
+
+class RenderIn(BaseModel):
+    card: dict[str, Any]
+
+
+class ExportIn(BaseModel):
+    project_id: str
+    format: str = "anki_tsv_v2"
+    production_id: str | None = None
+    card_ids: list[str] | None = None
+    preview: bool = False
+    author: str = ""
+    test_import: bool = False
 
 
 class SourceIn(BaseModel):
@@ -410,8 +472,9 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
     # ------------------------------------------------------------ produções e execuções
     def _orchestrator(provider: str, models: dict[str, str]) -> Orchestrator:
         fetcher = mock_fetcher if provider == "mock" else (st.fetcher or _safe_fetcher)
-        svc = full_creation.Services(db, st.gateway(provider), registry, models, st.settings.data_dir / "exports",
-                                     st.library, st.knowledge, fetcher)
+        svc = full_creation.Services(db, st.gateway(provider), registry, models, st.settings.exports_dir,
+                                     st.library, st.knowledge, fetcher, st.settings.media_dir,
+                                     st.settings.deck_prefix)
         return Orchestrator(db, full_creation.handlers(svc))
 
     def _models_for(provider: str, given: dict[str, str]) -> dict[str, str]:
@@ -519,21 +582,96 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
         Orchestrator(db, {}).skip(task_id, body.reason)
         return {"ok": True}
 
+    # ------------------------------------------------------------ cards (Fase 3)
+    cs, ex = st.cards, st.exporter
+
     @app.get("/api/cards")
-    def cards(production_id: str | None = None, limit: int = 200):
-        from cardfactory.db.models import CardVersion
-        with db.session() as s:
-            qy = select(Card).order_by(Card.created_at.desc()).limit(min(limit, 1000))
-            if production_id:
-                qy = qy.where(Card.production_id == production_id)
-            out = []
-            for c in s.execute(qy).scalars():
-                v = s.execute(select(CardVersion).where(CardVersion.card_id == c.id)
-                              .order_by(CardVersion.version_no.desc()).limit(1)).scalar_one_or_none()
-                out.append({"id": c.id, "card_key": c.card_key, "state": c.state, "origin": c.origin,
-                            "production_id": c.production_id, "version": v.version_no if v else None,
-                            "content": v.content if v else None})
-            return out
+    def cards(production_id: str | None = None, project_id: str | None = None, state: str | None = None,
+              limit: int = 200):
+        return cs.list(project_id=project_id, production_id=production_id, state=state, limit=min(limit, 1000))
+
+    @app.get("/api/cards/{card_id}")
+    def card_get(card_id: str):
+        return cs.get(card_id)
+
+    @app.post("/api/cards")
+    def card_create(body: CardIn):
+        _project(body.project_id)
+        if not body.author.strip():
+            raise HTTPException(400, "informe o autor")
+        cid = cs.create(body.project_id, body.card, origin="HUMAN", author_type="HUMAN", actor=body.author,
+                        state="DRAFT")
+        return {"id": cid}
+
+    @app.post("/api/cards/{card_id}/versions")
+    def card_edit(card_id: str, body: CardEditIn):
+        return cs.new_version(card_id, body.card, kind=body.kind, author_type="HUMAN", actor=body.author,
+                              note=body.note, objective_change=body.objective_change)
+
+    @app.post("/api/cards/{card_id}/rollback")
+    def card_rollback(card_id: str, body: RollbackIn):
+        return cs.rollback(card_id, body.version_no, actor=body.author, reason=body.reason)
+
+    @app.get("/api/cards/{card_id}/diff")
+    def card_diff(card_id: str, a: int, b: int):
+        return cs.diff(card_id, a, b)
+
+    @app.post("/api/cards/{card_id}/media/{asset_id}")
+    async def card_media(card_id: str, asset_id: str, request: Request, alt: str, side: str = "back",
+                         license: str = "", rights_verified: bool = False, author: str = ""):
+        data = await request.body()
+        return cs.attach_media(asset_id, data, alt=alt, side=side, license=license,
+                               rights_verified=rights_verified, actor=author or "humano")
+
+    @app.post("/api/findings/{finding_id}/justify")
+    def finding_justify(finding_id: str, body: JustifyIn):
+        cs.justify(finding_id, body.justification, actor=body.author)
+        return {"ok": True}
+
+    @app.post("/api/render")
+    def render_preview(body: RenderIn):
+        """Prévia de um card.v2 qualquer (não grava nada): HTML escuro/claro + achados."""
+        errs = structural_errors(body.card)
+        if errs:
+            return {"ok": False, "errors": errs, "findings": [], "rendered": None}
+        rendered = render(body.card)
+        findings = check_card(body.card, rendered, deck_prefix=st.settings.deck_prefix)
+        return {"ok": True, "errors": [], "findings": [f.as_dict() for f in findings],
+                "rendered": cs.preview(body.card)}
+
+    @app.get("/api/render/samples")
+    def render_samples():
+        return [{"layout": k, "card": c, "rendered": cs.preview(c),
+                 "findings": [f.as_dict() for f in check_card(c, render(c), deck_prefix=st.settings.deck_prefix)]}
+                for k, c in SAMPLES.items()]
+
+    @app.get("/api/render/palettes")
+    def render_palettes():
+        return {name: {**{k: getattr(p, k) for k in ("background", "text", "complement", "blue", "amber", "red",
+                                                      "separator")},
+                       "contrast": {k: round(contrast(getattr(p, k), p.background), 2)
+                                    for k in ("text", "complement", "blue", "amber", "red")}}
+                for name, p in PALETTES.items()}
+
+    # ------------------------------------------------------------ exportação (Fase 3)
+    @app.post("/api/exports")
+    def export_create(body: ExportIn):
+        _project(body.project_id)
+        return ex.export(body.project_id, body.format, production_id=body.production_id, card_ids=body.card_ids,
+                         preview=body.preview, actor=body.author, test_import=body.test_import)
+
+    @app.get("/api/exports")
+    def export_list(project_id: str | None = None):
+        return ex.list(project_id)
+
+    @app.get("/api/exports/{export_id}")
+    def export_get(export_id: str):
+        return ex.get(export_id)
+
+    @app.get("/api/exports/{export_id}/files/{name:path}")
+    def export_file(export_id: str, name: str):
+        path = ex.file_path(export_id, name)
+        return FileResponse(path, filename=path.name)
 
     # ------------------------------------------------------------ projetos
     @app.get("/api/projects")

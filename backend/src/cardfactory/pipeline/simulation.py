@@ -18,6 +18,13 @@ SIM_DOC = """<html><head><title>[SIMULADO] Documento de teste</title></head><bod
 
 SECTION_RE = re.compile(r'<untrusted_document id="([^"]+)">\n\[[^\n]*\]\n(.*?)\n</untrusted_document>', re.S)
 CLAIM_RE = re.compile(r"^- (clm_\w+) ", re.M)
+GEN_OBJ_RE = re.compile(r"^- (obj_\w+) \| ", re.M)
+GEN_CLAIM_RE = re.compile(
+    r"^- (clm_\w+) \| objetivo (obj_\w+) \| (\w+) \| (\w+) \| população: ([^|]*?)"
+    r"(?: \| numérico: [^|]*)? \| (.*)$", re.M)
+GEN_SRC_RE = re.compile(r"^- (src_\w+) \| (.*)$", re.M)
+GEN_SPAN_RE = re.compile(r'<untrusted_document id="(ev_\w+)">\n\[afirmação (clm_\w+)\]')
+MAX_RE = re.compile(r"no máximo (\d+) cards")
 
 
 async def mock_fetcher(url: str) -> tuple[bytes, str | None, str]:
@@ -65,7 +72,48 @@ def mock_responder(req: LLMRequest) -> dict[str, Any]:
                                for i, cid in enumerate(claim_ids)],
                 "limitations": ["resposta simulada"]}
     if "cards" in props:
-        return {"limitations": ["conteúdo simulado"],
-                "cards": [{"front": f"[SIMULADO] Pergunta {i + 1}?", "essential": f"[SIMULADO] Resposta {i + 1}"}
-                          for i in range(3)]}
+        return _mock_cards(user)
     return {"ok": True, "limitations": ["resposta simulada"]}
+
+
+def _mock_cards(user: str) -> dict[str, Any]:
+    """Um card card.v2 [SIMULADO] por objetivo, citando só IDs recebidos (exercita validação e renderização)."""
+    claims: dict[str, list[tuple[str, str, str, str]]] = {}
+    for cid, oid, comp, crit, _pop, text in GEN_CLAIM_RE.findall(user):
+        claims.setdefault(oid, []).append((cid, comp, crit, text.strip()))
+    spans: dict[str, list[str]] = {}
+    for sid, cid in GEN_SPAN_RE.findall(user):
+        spans.setdefault(cid, []).append(sid)
+    sources = GEN_SRC_RE.findall(user)
+    limit = int(m.group(1)) if (m := MAX_RE.search(user)) else 3
+    cards = []
+    for i, oid in enumerate(GEN_OBJ_RE.findall(user)[:limit]):
+        cl = claims.get(oid)
+        if not cl:
+            continue
+        cid, comp, crit, text = cl[0]
+        numeric = comp in ("DOSE", "CUTOFF", "INTERVAL", "DURATION")
+        target = {"text": "fármaco Z 5 mg uma vez ao dia" if numeric else "achado Y",
+                  "semantic": "value" if numeric else "diagnosis", "retrieval_target": True, "italic": False,
+                  "claim_ids": [cid]}
+        cards.append({
+            "objective_ids": [oid], "deck_path": ["IGOR", "Simulado"], "cognitive_type": "H" if numeric else "A",
+            "layout": "pharmacology" if numeric else "direct",
+            "front": {"segments": [{"text": f"[SIMULADO] Pergunta {i + 1}: qual é "
+                                    f"{'a dose do fármaco Z em adultos' if numeric else 'o achado que define X'}?",
+                                    "emphasis": "none", "italic": False}], "align": "auto"},
+            "minimal_answer": target["text"],
+            "answer": [{"role": "essential", "block": "paragraph", "title": None, "header": None,
+                        "items": [{"segments": [target], "cells": []}], "combination_rule": None,
+                        "combination_n": None, "combination_text": None},
+                       {"role": "complement", "block": "paragraph", "title": None, "header": None,
+                        "items": [{"segments": [{"text": "[SIMULADO] Conteúdo de teste, não é medicina.",
+                                                 "semantic": "complement", "retrieval_target": False,
+                                                 "italic": False, "claim_ids": []}], "cells": []}],
+                        "combination_rule": None, "combination_n": None, "combination_text": None}],
+            "short_reference": {"source_ids": [sources[0][0]], "display": "[SIMULADO] Documento de teste"}
+            if sources else None,
+            "tags": ["simulado"], "claims": [{"claim_id": cid, "text": text, "component": comp, "criticality": crit,
+                                              "population": "adultos" if numeric else ""}],
+            "evidence_span_ids": spans.get(cid, [])[:1], "media_requests": [], "limitations": ["conteúdo simulado"]})
+    return {"cards": cards, "unverified_claims": [], "limitations": ["resposta simulada"]}

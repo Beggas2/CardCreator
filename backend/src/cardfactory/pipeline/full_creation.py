@@ -1,25 +1,26 @@
-"""Grafo do modo "criação integral" (PIPELINE.md) com handlers da Fase 1.
+"""Grafo do modo "criação integral" (PIPELINE.md).
 
-Os handlers são reais em persistência, custo, prompts e estados, mas o conteúdo médico
-ainda não é produzido: contratos completos (card.v2, auditorias) chegam nas fases 2–4.
-Saídas desta fase carregam `phase: 1` para nunca serem confundidas com conteúdo validado.
+Reais: pesquisa, leitura, extração, planejamento e objetivos (Fase 2); geração card.v2, validação técnica
+e exportação (Fase 3). Ainda simplificadas: auditorias, correção e deduplicação (Fase 4) — suas saídas
+carregam `phase: 1` para nunca serem confundidas com auditoria real.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
 
+from cardfactory.cards.service import CardService
 from cardfactory.db import Database
-from cardfactory.db.models import Card, CardStateEvent, CardVersion, Production
+from cardfactory.db.models import Card, CardVersion, Production, ValidationFinding
+from cardfactory.export.service import Exporter
 from cardfactory.knowledge.service import Knowledge
 from cardfactory.library.service import Library
 from cardfactory.orchestrator.engine import AwaitingHuman, TaskContext, TaskSpec
+from cardfactory.pipeline import generation as gen
 from cardfactory.pipeline import research as rs
 from cardfactory.pipeline.research import Fetcher, ResearchServices
 from cardfactory.prompts.registry import PromptRegistry
@@ -49,10 +50,6 @@ CRITICAL = {"AUDIT_SCI", "REAUDIT", "GENERATION", "CORRECTION", "EXTRACTION"}
 STAGE_SCHEMA = {"type": "object", "properties": {"ok": {"type": "boolean"},
                                                  "limitations": {"type": "array", "items": {"type": "string"}}},
                 "required": ["ok", "limitations"]}
-GEN_SCHEMA = {"type": "object", "required": ["cards", "limitations"], "properties": {
-    "limitations": {"type": "array", "items": {"type": "string"}},
-    "cards": {"type": "array", "items": {"type": "object", "required": ["front", "essential"], "properties": {
-        "front": {"type": "string", "minLength": 1}, "essential": {"type": "string", "minLength": 1}}}}}}
 
 
 def graph(budget_ids: list[str]) -> list[TaskSpec]:
@@ -70,6 +67,15 @@ class Services:
     library: Library | None = None
     knowledge: Knowledge | None = None
     fetcher: Fetcher | None = None
+    media_dir: Path | None = None
+    deck_prefix: str = "IGOR"
+
+    def cards(self) -> CardService:
+        return CardService(self.db, self.media_dir or self.exports_dir.parent / "media", deck_prefix=self.deck_prefix)
+
+    def exporter(self) -> Exporter:
+        return Exporter(self.db, self.exports_dir, self.media_dir or self.exports_dir.parent / "media",
+                        deck_prefix=self.deck_prefix)
 
     def research(self) -> ResearchServices:
         if self.library is None or self.knowledge is None or self.fetcher is None:
@@ -126,55 +132,35 @@ def handlers(svc: Services) -> dict[str, Any]:
         return {"phase": 1, "existing_cards": n}
 
     async def generation(ctx: TaskContext) -> dict:
-        prd = _production(svc.db, ctx.run_id)
-        if "card_ids" in ctx.checkpoint:  # retomada: cards já gravados
-            return {"phase": 1, "card_ids": ctx.checkpoint["card_ids"]}
-        parsed, call_id = await _ai_stage(svc, ctx, "creator", GEN_SCHEMA,
-                                          f"Gere até {prd.target_cards} cards sobre: {prd.theme}")
-        ids = []
-        with svc.db.write() as s:
-            for c in parsed["cards"][: prd.target_cards]:
-                card = Card(project_id=prd.project_id, production_id=prd.id, state="GENERATED",
-                            origin="MOCK" if svc.gateway.provider.name == "mock" else "GENERATED")
-                s.add(card)
-                s.flush()
-                content = {"front": c["front"], "essential": c["essential"], "phase": 1}
-                s.add(CardVersion(card_id=card.id, version_no=1, content=content, created_by_call_id=call_id,
-                                  content_hash=hashlib.sha256(json.dumps(content, sort_keys=True).encode())
-                                  .hexdigest()))
-                s.add(CardStateEvent(card_id=card.id, from_state="DRAFT", to_state="GENERATED", actor=call_id,
-                                     actor_type="AI", reason="geração"))
-                ids.append(card.id)
-        ctx.save_checkpoint({"card_ids": ids})
-        return {"phase": 1, "card_ids": ids, "call_id": call_id, "limitations": parsed["limitations"]}
+        return await gen.generation(svc.research(), ctx, svc.cards())
 
     async def tech_validation(ctx: TaskContext) -> dict:
+        """Validação técnica determinística (C§38): erros abertos ficam listados; nada é aprovado aqui."""
         prd = _production(svc.db, ctx.run_id)
-        problems = []
         with svc.db.session() as s:
             cards = list(s.execute(select(Card).where(Card.production_id == prd.id)).scalars())
+            with_errors, warnings = [], 0
             for c in cards:
                 v = s.execute(select(CardVersion).where(CardVersion.card_id == c.id)
                               .order_by(CardVersion.version_no.desc()).limit(1)).scalar_one()
-                if not v.content.get("front") or not v.content.get("essential"):
-                    problems.append(c.id)
-        return {"phase": 1, "checked": len(cards), "problems": problems}
+                levels = s.execute(select(ValidationFinding.level).where(
+                    ValidationFinding.card_version_id == v.id, ValidationFinding.status == "OPEN")).scalars().all()
+                if "ERROR" in levels:
+                    with_errors.append(c.card_key)
+                warnings += levels.count("WARNING")
+        return {"checked": len(cards), "with_errors": with_errors, "open_warnings": warnings}
 
     async def human_review(ctx: TaskContext) -> dict:
         raise AwaitingHuman("revisão humana obrigatória antes da exportação (APR-004)")
 
     async def export(ctx: TaskContext) -> dict:
+        """Exporta os cards da produção. Sem aprovação humana registrada, sai como prévia rotulada."""
         prd = _production(svc.db, ctx.run_id)
-        with svc.db.session() as s:
-            cards = [{"card_key": c.card_key, "state": c.state, "origin": c.origin}
-                     for c in s.execute(select(Card).where(Card.production_id == prd.id)).scalars()]
-        d = svc.exports_dir / ctx.run_id
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / "manifesto_preliminar.json"
-        path.write_text(json.dumps({"run_id": ctx.run_id, "phase": 1, "cards": cards,
-                                    "aviso": "Manifesto preliminar. Exportação TSV para o Anki chega na Fase 3."},
-                                   ensure_ascii=False, indent=2), encoding="utf-8")
-        return {"phase": 1, "manifest": str(path), "cards": len(cards)}
+        res = svc.exporter().export(prd.project_id, "anki_tsv_v2", production_id=prd.id, preview=True,
+                                    actor=f"run:{ctx.run_id}")
+        manifest = next((f["name"] for f in res["files"] if f["kind"] == "MANIFEST"), None)
+        return {"export_id": res["export_id"], "state": res["state"], "dir": res["dir"], "manifest": manifest,
+                "counts": res["counts"], "errors": res["errors"][:20]}
 
     def research_handler(fn):
         async def h(ctx: TaskContext) -> dict:

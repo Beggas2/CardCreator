@@ -149,7 +149,8 @@ class Knowledge:
         with self.db.write() as s:
             s.get(LearningObjective, objective_id).coverage_state = state
 
-    def lease_objectives(self, production_id: str, owner: str, limit: int, lease_s: float = 900) -> list[str]:
+    def lease_objectives(self, production_id: str, owner: str, limit: int, lease_s: float = 900,
+                         exclude: list[str] | None = None) -> list[str]:
         """TEC-017: reserva atômica de objetivos para um lote; lotes paralelos nunca recebem o mesmo objetivo."""
         now = datetime.now(UTC)
         out: list[str] = []
@@ -159,6 +160,7 @@ class Knowledge:
                 LearningObjective.necessity.in_(["REQUIRED", "RECOMMENDED"]),
                 LearningObjective.coverage_state.in_(["ABSENT", "PARTIAL", "INCORRECT", "OUTDATED"]),
                 (LearningObjective.lease_owner.is_(None)) | (LearningObjective.lease_expires_at < now),
+                LearningObjective.id.not_in(exclude or []),
             ).order_by(LearningObjective.created_at).limit(limit)).scalars().all()
             for oid in cands:
                 res = s.execute(update(LearningObjective).where(

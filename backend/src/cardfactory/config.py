@@ -46,6 +46,19 @@ class Settings:
         return REPO_ROOT / "docs" / "normative"
 
     @property
+    def exports_dir(self) -> Path:
+        return self.data_dir / "exports"
+
+    @property
+    def media_dir(self) -> Path:
+        return self.data_dir / "media"
+
+    @property
+    def deck_prefix(self) -> str:
+        """AMB-07: prefixo de deck configurável, padrão IGOR."""
+        return os.environ.get("CARDFACTORY_DECK_PREFIX", "IGOR")
+
+    @property
     def openrouter_configured(self) -> bool:
         return self._has_key
 

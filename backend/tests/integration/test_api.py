@@ -58,20 +58,28 @@ def test_full_creation_pipeline_with_mock(client, tmp_path):
     assert all(states[s] == "SUCCEEDED" for s, _ in full_creation.STAGES[:14])
 
     cards = client.get("/api/cards").json()
-    assert len(cards) == 3 and all(c["origin"] == "MOCK" for c in cards)
+    assert len(cards) == 2 and all(c["origin"] == "MOCK" and c["schema_version"] == "2.1" for c in cards)
+    assert all(c["open_errors"] == 0 for c in cards)
     calls = client.get("/api/calls").json()
     ai_stages = [s for s, role in full_creation.STAGES if role]
     assert sorted(c["stage"] for c in calls) == sorted(ai_stages)
     assert all(c["prompt_hash"] and c["state"] == "SUCCEEDED" for c in calls)
 
-    # Revisão humana registrada → exportação do manifesto preliminar.
+    # Revisão humana registrada → exportação (prévia rotulada, pois nenhum card tem aprovação humana ainda).
     hr = next(t for t in detail["task_list"] if t["key"] == "HUMAN_REVIEW")
     assert client.post(f"/api/tasks/{hr['id']}/skip", json={"reason": "revisado no teste"}).status_code == 200
     client.post(f"/api/runs/{run}/resume")
     done = _wait(client, run, {"COMPLETED"})
     export = next(t for t in done["task_list"] if t["key"] == "EXPORT")
-    manifest = json.loads(Path(export["output"]["manifest"]).read_text(encoding="utf-8"))
-    assert len(manifest["cards"]) == 3 and "Fase 3" in manifest["aviso"]
+    out = export["output"]
+    assert out["state"] == "READY" and out["counts"]["exported"] == 2 and out["counts"]["new_notes"] == 2
+    manifest = json.loads((Path(out["dir"]) / out["manifest"]).read_text(encoding="utf-8"))
+    assert manifest["preview_not_reviewed"] and manifest["round_trip_ok"]
+    assert manifest["manifest_version"] == "manifest.v1"
+    deck = next(f for f in manifest["files"] if f["kind"] == "DECK")
+    assert deck["name"].startswith("PREVIA_NAO_REVISADA_")
+    data = (Path(out["dir"]) / deck["name"]).read_bytes()
+    assert data.startswith(b"#separator:tab\n#html:true\n#guid column:1\n") and not data.startswith(b"\xef\xbb\xbf")
 
 
 def test_paid_production_requires_explicit_models_and_budget(tmp_path):

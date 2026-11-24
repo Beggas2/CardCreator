@@ -1,4 +1,4 @@
-"""Modelo relacional da Fase 1 (ver DATA_MODEL.md). Tabelas das fases 2–4 entram por novas migrações."""
+"""Modelo relacional (ver DATA_MODEL.md). Cada fase acrescenta tabelas por nova migração."""
 
 from __future__ import annotations
 
@@ -286,6 +286,11 @@ class CardVersion(Timestamped, Base):
     created_by_call_id: Mapped[str | None] = mapped_column(ForeignKey("llm_call.id"))
     objective_change: Mapped[str] = mapped_column(String(20), default="EQUIVALENT")
     content_hash: Mapped[str] = mapped_column(String(64))
+    cognitive_type: Mapped[str | None] = mapped_column(String(1))
+    layout: Mapped[str | None] = mapped_column(String(20))
+    didactic_order: Mapped[int | None] = mapped_column(Integer)
+    note: Mapped[str] = mapped_column(Text, default="")
+    restored_from_version: Mapped[int | None] = mapped_column(Integer)
 
 
 class CardStateEvent(Timestamped, Base):
@@ -546,5 +551,90 @@ class ImportBatch(Timestamped, Base):
     filename: Mapped[str] = mapped_column(String(500), default="")
     content_hash: Mapped[str] = mapped_column(String(64))
     format_detected: Mapped[str] = mapped_column(String(40), default="")
+    report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(100), default="")
+
+
+# ------------------------------------------------------------------ cards, renderização e exportação (Fase 3)
+class CardObjective(Base):
+    __tablename__ = "card_objective"
+    card_version_id: Mapped[str] = mapped_column(ForeignKey("card_version.id"), primary_key=True)
+    objective_id: Mapped[str] = mapped_column(ForeignKey("learning_objective.id"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(10), default="PRIMARY")
+
+
+class RenderedArtifact(Timestamped, Base):
+    """HTML derivado e reproduzível de uma versão (TEC-015)."""
+
+    __tablename__ = "rendered_artifact"
+    __table_args__ = (UniqueConstraint("card_version_id", "renderer_version", "palette"),)
+    id: Mapped[str] = _id("rnd")
+    card_version_id: Mapped[str] = mapped_column(ForeignKey("card_version.id"), index=True)
+    renderer_version: Mapped[str] = mapped_column(String(20))
+    palette: Mapped[str] = mapped_column(String(10), default="dark")
+    front_html: Mapped[str] = mapped_column(Text)
+    back_html: Mapped[str] = mapped_column(Text)
+    html_hash: Mapped[str] = mapped_column(String(64))
+
+
+class Operation(Timestamped, Base):
+    """[append-only] Operações sobre cards (R§37); manifestos derivam daqui."""
+
+    __tablename__ = "operation"
+    id: Mapped[str] = _id("op")
+    card_id: Mapped[str] = mapped_column(ForeignKey("card.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    from_version_id: Mapped[str | None] = mapped_column(ForeignKey("card_version.id"))
+    to_version_id: Mapped[str | None] = mapped_column(ForeignKey("card_version.id"))
+    related_card_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    justification: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="APPLIED")
+    actor: Mapped[str] = mapped_column(String(100), default="system")
+    actor_type: Mapped[str] = mapped_column(String(10), default="SYSTEM")
+
+
+class MediaAsset(Timestamped, Base):
+    __tablename__ = "media_asset"
+    id: Mapped[str] = _id("med")
+    card_id: Mapped[str] = mapped_column(ForeignKey("card.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), default="IMAGE")
+    finding: Mapped[str] = mapped_column(Text, default="")
+    desired_source: Mapped[str] = mapped_column(Text, default="")
+    purpose: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(10), default="PENDING")  # PENDING | OBTAINED | REJECTED
+    file_name: Mapped[str | None] = mapped_column(String(300))
+    sha256: Mapped[str | None] = mapped_column(String(64))
+    license: Mapped[str] = mapped_column(String(200), default="")
+    rights_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class ValidationFinding(Timestamped, Base):
+    __tablename__ = "validation_finding"
+    id: Mapped[str] = _id("vf")
+    card_version_id: Mapped[str | None] = mapped_column(ForeignKey("card_version.id"), index=True)
+    export_run_id: Mapped[str | None] = mapped_column(ForeignKey("export_run.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    level: Mapped[str] = mapped_column(String(10))  # ERROR | WARNING
+    message: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), default="OPEN")  # OPEN | FIXED | JUSTIFIED
+    justification: Mapped[str] = mapped_column(Text, default="")
+    resolved_by: Mapped[str] = mapped_column(String(100), default="")
+
+
+class ExportRun(Timestamped, Base):
+    __tablename__ = "export_run"
+    id: Mapped[str] = _id("exp")
+    project_id: Mapped[str] = mapped_column(ForeignKey("project.id"), index=True)
+    production_id: Mapped[str | None] = mapped_column(ForeignKey("production.id"))
+    mode: Mapped[str] = mapped_column(String(30), default="DECK")
+    format: Mapped[str] = mapped_column(String(20))
+    version_label: Mapped[str] = mapped_column(String(40))
+    state: Mapped[str] = mapped_column(String(12), default="BLOCKED")  # READY | BLOCKED
+    files: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    card_versions: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # card_key → version_no
+    round_trip_ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    import_tested: Mapped[str] = mapped_column(String(12), default="NOT_TESTED")  # NOT_TESTED | PASSED | FAILED
+    previous_export_id: Mapped[str | None] = mapped_column(ForeignKey("export_run.id"))
+    diff: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     report: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     created_by: Mapped[str] = mapped_column(String(100), default="")
