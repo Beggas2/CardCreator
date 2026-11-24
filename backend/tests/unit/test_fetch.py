@@ -60,3 +60,20 @@ async def test_redirect_loop():
     t = httpx.MockTransport(lambda r: httpx.Response(302, headers={"location": "/loop"}))
     with pytest.raises(FetchFailedError):
         await safe_fetch("https://gov.example/loop", resolver=public, transport=t)
+
+
+def test_resolution_delegated_to_proxy_only_when_opted_in(monkeypatch):
+    from cardfactory.security import fetch as f
+
+    def fail(host, port):
+        raise f.FetchFailedError("sem DNS")
+
+    monkeypatch.setattr(f, "system_resolver", fail)
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
+    monkeypatch.delenv("CARDFACTORY_FETCH_VIA_PROXY", raising=False)
+    with pytest.raises(f.FetchFailedError):
+        f.validate_url("https://exemplo.org/doc", f.default_resolver())
+    monkeypatch.setenv("CARDFACTORY_FETCH_VIA_PROXY", "1")
+    assert f.validate_url("https://exemplo.org/doc", f.default_resolver()) == "https://exemplo.org/doc"
+    with pytest.raises(f.FetchBlockedError):  # IP literal privado continua bloqueado
+        f.validate_url("https://10.0.0.1/x", f.default_resolver())

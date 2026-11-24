@@ -9,6 +9,7 @@ Risco residual documentado em SECURITY.md: troca de DNS entre a validação e a 
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -40,6 +41,28 @@ def system_resolver(host: str, port: int) -> list[str]:
     return sorted({i[4][0] for i in infos})
 
 
+class ResolutionDelegatedError(Exception):
+    """A resolução de nomes é feita por um proxy de saída que impõe a lista de hosts permitidos."""
+
+
+def proxied_resolver(host: str, port: int) -> list[str]:
+    """Para ambientes onde só o proxy resolve nomes (opt-in por CARDFACTORY_FETCH_VIA_PROXY=1).
+
+    Se o nome resolve localmente, a verificação de IP público continua valendo; se não resolve e há proxy
+    configurado, o destino é decidido pelo proxy (que só alcança hosts públicos permitidos).
+    """
+    try:
+        return system_resolver(host, port)
+    except FetchFailedError:
+        if os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"):
+            raise ResolutionDelegatedError(host) from None
+        raise
+
+
+def default_resolver() -> Resolver:
+    return proxied_resolver if os.environ.get("CARDFACTORY_FETCH_VIA_PROXY") == "1" else system_resolver
+
+
 def _check_ip(ip: str) -> None:
     addr = ipaddress.ip_address(ip.split("%")[0])
     if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
@@ -65,7 +88,10 @@ def validate_url(url: str, resolver: Resolver = system_resolver) -> str:
     try:
         _check_ip(host)  # host literal
     except ValueError:
-        ips = resolver(host, port)
+        try:
+            ips = resolver(host, port)
+        except ResolutionDelegatedError:
+            return parts.geturl()
         if not ips:
             raise FetchFailedError(f"{host} não resolveu") from None
         for ip in ips:
@@ -82,8 +108,9 @@ class Fetched:
     data: bytes
 
 
-async def safe_fetch(url: str, *, resolver: Resolver = system_resolver, max_bytes: int = MAX_BYTES,
+async def safe_fetch(url: str, *, resolver: Resolver | None = None, max_bytes: int = MAX_BYTES,
                      timeout_s: float = 30.0, transport: httpx.AsyncBaseTransport | None = None) -> Fetched:
+    resolver = resolver or default_resolver()
     current = validate_url(url, resolver)
     async with httpx.AsyncClient(timeout=timeout_s, follow_redirects=False, transport=transport,
                                  headers={"User-Agent": USER_AGENT}) as client:
