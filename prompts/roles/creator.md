@@ -19,3 +19,6 @@ Fármacos de emergência entram como unidade operacional completa. Contraindica�
 
 <!-- req: PRI-003, PRI-005, PRI-007 -->
 Não corte condições indispensáveis para encurtar, não invente números e declare incertezas.
+
+<!-- req: VIS-001 -->
+Quando o objetivo é reconhecer um achado visual (lesão, exame de imagem, traçado, peça), registre em `media_requests` qual imagem o card precisa, mesmo que nenhuma esteja disponível. Se o sistema listar figuras da apostila, use a que mostra exatamente o achado.

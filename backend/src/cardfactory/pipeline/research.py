@@ -91,10 +91,13 @@ class TruncatedOutputError(ContractViolation):
 # ---------------------------------------------------------------------------- RESEARCH
 async def research(svc: ResearchServices, ctx: TaskContext) -> dict:
     prd = production_of(svc.db, ctx.run_id)
-    if prd.research_mode == "UPLOADED":
-        return {"skipped": "modo somente documentos enviados", "document_ids": []}
     scope = prd.scope or {}
+    update = scope.get("update_check") if prd.research_mode == "UPLOADED" else None
+    if prd.research_mode == "UPLOADED" and not update:
+        return {"skipped": "modo somente documentos enviados", "document_ids": []}
     query = f"{prd.theme} | {json.dumps(scope.get('research_scope') or {}, sort_keys=True, ensure_ascii=False)}"
+    if update:
+        query += f" | atualizações desde {update.get('since') or '?'}"
     cache_key = hashlib.sha256(f"researcher|{query}".encode()).hexdigest()
     cutoff = datetime.now(UTC) - timedelta(days=RESEARCH_CACHE_DAYS)
     with svc.db.session() as s:
@@ -110,6 +113,13 @@ async def research(svc: ResearchServices, ctx: TaskContext) -> dict:
         ws = scope.get("web_search")
         user = (f"Tema: {prd.theme}\nEscopo: {json.dumps(scope.get('research_scope') or {}, ensure_ascii=False)}\n"
                 "Liste fontes primárias candidatas, priorizando as brasileiras oficiais. Informe só o que viu.")
+        if update:
+            # Checagem de atualização: a apostila é a fonte principal; procura só o que pode tê-la superado.
+            since = update.get("since") or "ano desconhecido"
+            user = (f"Tema: {prd.theme}\nA fonte principal é uma apostila de {since}. "
+                    "Liste apenas diretrizes ou protocolos oficiais brasileiros (Ministério da Saúde, sociedades "
+                    "médicas) publicados ou atualizados depois dela que mudem diagnóstico, tratamento, doses ou "
+                    "condutas deste tema. Se não encontrar, devolva a lista vazia. Informe só o que viu.")
         parsed, call_id = await call_role(svc, ctx, "researcher", RESEARCH_RESULT_V1, user, "research",
                                           web_search=ws, web_searches=int((ws or {}).get("max_uses", 1)) if ws else 0,
                                           web_price=scope.get("web_search_price_usd"))
@@ -117,7 +127,8 @@ async def research(svc: ResearchServices, ctx: TaskContext) -> dict:
             s.add(ResearchQuery(production_id=prd.id, query=query, engine="researcher", filters={},
                                 result=parsed, cost_call_id=call_id, cache_key=cache_key))
     doc_ids: list[str] = []
-    for c in parsed["candidates"]:
+    candidates = parsed["candidates"][:int(update.get("max_sources", 2))] if update else parsed["candidates"]
+    for c in candidates:
         url = c["url"].strip()
         if not url.lower().startswith(("http://", "https://")):
             continue

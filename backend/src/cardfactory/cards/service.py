@@ -61,7 +61,7 @@ class CardService:
                origin: str = "GENERATED", author_type: str = "AI", actor: str = "system", call_id: str | None = None,
                state: str = "GENERATED", didactic_order: int | None = None) -> str:
         card_key = new_id("ck")
-        stored = to_stored(model_card, card_key=card_key)
+        stored = to_stored(model_card, card_key=card_key, images=self._apostila_images(model_card))
         with self.db.write() as s:
             card = Card(project_id=project_id, card_key=card_key, production_id=production_id, origin=origin,
                         state=state)
@@ -76,9 +76,28 @@ class CardService:
                                  actor_type=author_type if author_type in ("AI", "HUMAN") else "SYSTEM",
                                  reason="criação"))
             for mr in stored["media_requests"]:
+                fig = self._figure_file(mr["desired_source"])
                 s.add(MediaAsset(card_id=card.id, finding=mr["finding"], desired_source=mr["desired_source"],
-                                 purpose=mr["purpose"]))
+                                 purpose=mr["purpose"], status="OBTAINED" if fig else "PENDING", file_name=fig,
+                                 license="apostila de estudo pessoal" if fig else ""))
             return card.id
+
+    def _figure_file(self, desired_source: str) -> str | None:
+        """'figura:<arquivo>' que existe na pasta de mídia (figura extraída da apostila)."""
+        if not desired_source.startswith("figura:"):
+            return None
+        name = desired_source.removeprefix("figura:").strip()
+        if not name or "/" in name or "\\" in name or name.startswith("."):
+            return None
+        return name if (self.media_dir / name).is_file() else None
+
+    def _apostila_images(self, model_card: dict[str, Any]) -> list[dict[str, Any]]:
+        out = []
+        for mr in model_card.get("media_requests") or []:
+            fig = self._figure_file(mr.get("desired_source", ""))
+            if fig and fig not in {im["file"] for im in out}:
+                out.append({"file": fig, "alt": (mr.get("finding") or "")[:200], "side": "back"})
+        return out
 
     def new_version(self, card_id: str, content: dict[str, Any], *, kind: str = "UPDATE_CONTENT",
                     author_type: str = "HUMAN", actor: str, note: str = "", objective_change: str = "EQUIVALENT",

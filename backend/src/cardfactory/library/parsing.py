@@ -195,6 +195,17 @@ def parse_html(data: str) -> ParseResult:
     return ParseResult(p.sections, title=(p.title or None), warnings=warnings)
 
 
+def _repeated_lines(pages: list[str], share: float = 0.5) -> set[str]:
+    """Linhas iguais em pelo menos metade das páginas (mínimo 3): cabeçalho, rodapé ou marca d'água."""
+    if len(pages) < 3:
+        return set()
+    count: dict[str, int] = {}
+    for p in pages:
+        for ln in {x.strip() for x in p.splitlines() if len(x.strip()) >= 10}:
+            count[ln] = count.get(ln, 0) + 1
+    return {ln for ln, n in count.items() if n / len(pages) >= share}
+
+
 def parse_pdf(data: bytes) -> ParseResult:
     from pypdf import PdfReader
 
@@ -205,11 +216,19 @@ def parse_pdf(data: bytes) -> ParseResult:
     if reader.is_encrypted:
         return ParseResult([], warnings=["PDF protegido por senha"])
     sections, warnings = [], []
+    raw: list[str | None] = []
     for i, page in enumerate(reader.pages, start=1):
         try:
-            text = _norm_ws(page.extract_text() or "")
+            raw.append(page.extract_text() or "")
         except Exception as e:  # noqa: BLE001
-            text, warnings = "", warnings + [f"página {i}: falha de extração ({type(e).__name__})"]
+            raw.append(None)
+            warnings.append(f"página {i}: falha de extração ({type(e).__name__})")
+    repeated = _repeated_lines([r for r in raw if r is not None])
+    if repeated:
+        warnings.append(f"{len(repeated)} linha(s) repetida(s) em quase todas as páginas removida(s) "
+                        "(cabeçalho, rodapé ou marca d'água)")
+    for i, r in enumerate(raw, start=1):
+        text = _norm_ws("\n".join(ln for ln in (r or "").splitlines() if ln.strip() not in repeated))
         if len(text) < MIN_PAGE_CHARS:
             sections.append(ParsedSection(f"p. {i}", text, page_from=i, page_to=i, parse_quality="FAILED"))
             warnings.append(f"página {i} sem texto extraível (possivelmente escaneada; OCR pendente)")

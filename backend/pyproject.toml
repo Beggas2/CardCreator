@@ -13,6 +13,7 @@ dependencies = [
   "jsonschema>=4.23",
   "pyyaml>=6.0",
   "pypdf>=7.1.1",
+  "pillow>=11",
 ]
 
 [project.optional-dependencies]

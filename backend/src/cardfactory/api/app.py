@@ -43,6 +43,7 @@ from cardfactory.finance.budget import BudgetError, FinanceService
 from cardfactory.importers.anki import AnkiImporter
 from cardfactory.importers.questions import import_questions
 from cardfactory.knowledge.service import Knowledge, KnowledgeError
+from cardfactory.library.apostila import ApostilaError, import_apostila
 from cardfactory.library.service import Library, LibraryError
 from cardfactory.orchestrator.engine import Orchestrator, OrchestratorError
 from cardfactory.pipeline import full_audit, full_creation
@@ -225,6 +226,10 @@ class ProductionIn(BaseModel):
     models: dict[str, str] = {}
     research_mode: str = "HYBRID"  # AUTONOMOUS | UPLOADED | HYBRID (BIB-001)
     document_ids: list[str] = []
+    # Apostila como fonte principal (UPLOADED): checagem barata de diretrizes posteriores na web (opcional).
+    update_check_since: str | None = None
+    update_check_max_sources: int = 2
+    web_search_max_results: int = 3
     mode: str = "FULL_CREATION"  # FULL_CREATION | FULL_AUDIT
     # Escopo da auditoria integral (FULL_AUDIT): cards escolhidos por id, lote de importação e/ou deck.
     card_ids: list[str] = []
@@ -594,6 +599,10 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
             if p.mode not in MODES:
                 raise HTTPException(400, f"modo desconhecido: {p.mode}")
             scope = {"models": models, "document_ids": p.document_ids}
+            if p.research_mode == "UPLOADED" and p.update_check_since:
+                scope |= {"update_check": {"since": p.update_check_since,
+                                           "max_sources": max(1, min(p.update_check_max_sources, 5))},
+                          "web_search": {"max_results": max(1, min(p.web_search_max_results, 10))}}
             if p.mode == full_audit.MODE:
                 scope |= {"card_ids": p.card_ids, "import_batch_ids": p.import_batch_ids,
                           "deck_prefix": p.deck_prefix}
@@ -1014,6 +1023,19 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
         res = lib.ingest(did, data, declared_mime=request.headers.get("content-type"), filename=filename,
                          origin="USER_UPLOAD", actor=actor)
         return res.__dict__
+
+    @app.post("/api/library/apostila")
+    async def lib_apostila(request: Request, pages: str, title: str, institution: str = "", year: str = "",
+                           actor: str = "usuário"):
+        """Recorte de páginas de uma apostila em PDF: texto como fonte secundária e figuras com legenda."""
+        data = await request.body()
+        if len(data) > 500 * 1024 * 1024:
+            raise HTTPException(413, "arquivo maior que 500 MB")
+        try:
+            return import_apostila(lib, st.settings.media_dir, data, pages=pages, title=title,
+                                   institution=institution, year=year or None, actor=actor)
+        except ApostilaError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/api/library/versions/{version_id}/fetch")
     async def lib_fetch(version_id: str, b: FetchIn, actor: str = "usuário"):

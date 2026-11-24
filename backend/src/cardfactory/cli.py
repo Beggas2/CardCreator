@@ -181,8 +181,11 @@ def _etapa1(args: argparse.Namespace) -> int:
         state["objective_ids"] = er.pick_objectives(env, out["production_id"], args.objetivos)
     elif args.passo == "completo":
         models = dict(kv.split("=", 1) for kv in lst)  # ETAPA=modelo; "default" cobre as demais
+        ws = {"max_results": args.busca_web} if args.busca_web else None
+        docs = [d.strip() for d in (args.documentos or "").split(",") if d.strip()]
         out = asyncio.run(er.full_run(env, theme=args.tema, models=models, budget_id=state["budget_id"],
-                                      target_cards=args.cards))
+                                      target_cards=args.cards, web_search=ws, web_search_price_usd=args.preco_busca,
+                                      document_ids=docs or None, update_since=args.atualizacao_desde))
         state.setdefault("full", []).append(out)
     elif args.passo == "a":
         out = asyncio.run(er.round_a(env, pilot_production_id=state["prepare"]["production_id"],
@@ -196,6 +199,27 @@ def _etapa1(args: argparse.Namespace) -> int:
     state["budget"] = FinanceService(db).status(state["budget_id"]).as_dict()
     save()
     print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
+def _apostila(args) -> int:
+    import json
+    from pathlib import Path
+
+    from cardfactory.db import Database, make_engine
+    from cardfactory.library.apostila import ApostilaError, import_apostila
+    from cardfactory.library.service import Library
+
+    settings = load_settings()
+    db = Database(make_engine(settings.db_path))
+    try:
+        out = import_apostila(Library(db, settings.data_dir / "blobs"), settings.media_dir,
+                              Path(args.arquivo).read_bytes(), pages=args.paginas, title=args.titulo,
+                              institution=args.instituicao, year=args.ano, actor="cli")
+    except (ApostilaError, OSError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -216,6 +240,13 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--cambio", default=None, help="cadastra a cotação USD→BRL antes de estimar")
     e.add_argument("--sem-sincronizar", action="store_true", help="usa o catálogo já salvo")
     e.set_defaults(fn=_experiment)
+    a = sub.add_parser("apostila", help="importa páginas de uma apostila em PDF (texto e figuras com legenda)")
+    a.add_argument("--arquivo", required=True)
+    a.add_argument("--paginas", required=True, help="ex.: 108-112")
+    a.add_argument("--titulo", required=True)
+    a.add_argument("--instituicao", default="")
+    a.add_argument("--ano", default=None)
+    a.set_defaults(fn=_apostila)
     t = sub.add_parser("etapa1", help="Etapa 1 com modelos reais: orcamento | preparar | a | b")
     t.add_argument("passo", choices=["orcamento", "preparar", "completo", "a", "b"])
     t.add_argument("--cambio")
@@ -228,6 +259,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--objetivos", type=int, default=5)
     t.add_argument("--cards", type=int, default=8, help="meta de cards da produção completa")
     t.add_argument("--pesquisador", help="modelo só da pesquisa de fontes (padrão: o de apoio)")
+    t.add_argument("--documentos", help="completo: IDs de documentos (ex.: apostila importada), separados por vírgula")
+    t.add_argument("--atualizacao-desde", help="ano da apostila: checa diretrizes posteriores")
     t.add_argument("--busca-web", type=int, default=0, help="resultados de busca na pesquisa (0 = sem busca)")
     t.add_argument("--preco-busca", default=None, help="US$ por busca, para a estimativa")
     t.set_defaults(fn=_etapa1)

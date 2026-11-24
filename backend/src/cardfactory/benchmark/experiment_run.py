@@ -275,8 +275,12 @@ async def round_b(env: Env, *, auditors: list[str], budget_id: str, actor: str) 
 
 # ---------------------------------------------------------------------------- produção completa
 async def full_run(env: Env, *, theme: str, models: dict[str, str], budget_id: str, target_cards: int,
-                   web_search: dict | None = None, web_search_price_usd: str | None = None) -> dict[str, Any]:
-    """Uma produção de ponta a ponta pelo grafo normal (para na revisão humana obrigatória)."""
+                   web_search: dict | None = None, web_search_price_usd: str | None = None,
+                   document_ids: list[str] | None = None, update_since: str | None = None) -> dict[str, Any]:
+    """Uma produção de ponta a ponta pelo grafo normal (para na revisão humana obrigatória).
+
+    Com document_ids, a produção usa só esses documentos (ex.: apostila) e, com update_since, faz a checagem
+    de diretrizes posteriores na web."""
     with env.db.write() as s:
         prj = s.execute(select(Project).where(Project.name == PROJECT)).scalar_one_or_none()
         if prj is None:
@@ -286,8 +290,14 @@ async def full_run(env: Env, *, theme: str, models: dict[str, str], budget_id: s
         scope: dict[str, Any] = {"models": models, "experiment": "etapa1-completo"}
         if web_search:
             scope |= {"web_search": web_search, "web_search_price_usd": web_search_price_usd}
+        mode = "AUTONOMOUS"
+        if document_ids:
+            mode = "UPLOADED"
+            scope["document_ids"] = list(document_ids)
+            if update_since:
+                scope["update_check"] = {"since": update_since, "max_sources": 2}
         prd = Production(project_id=prj.id, mode=full_creation.MODE, theme=theme, target_cards=target_cards,
-                         provider=env.gateway.provider.name, research_mode="AUTONOMOUS", scope=scope)
+                         provider=env.gateway.provider.name, research_mode=mode, scope=scope)
         s.add(prd)
         s.flush()
         prd_id = prd.id
