@@ -2,13 +2,20 @@
 
 ## Fase 6 — experimento com modelos reais (em andamento)
 
-- 24/11/2026: a proprietária autorizou a Etapa 1 até R$ 15.
-- Pronto: `cardfactory experimento` sincroniza o catálogo da OpenRouter (consulta gratuita), escolhe um candidato
-  por família por regra (saída estruturada, contexto ≥ 64 mil tokens, lançado nos últimos 540 dias, teto de
-  preço) e estima o custo das rodadas em reais. Grava `data/experimento/etapa1-plano.md`. Também em
-  `GET /api/experiment/plan`. Nenhuma chamada de geração é feita.
-- Falta: a proprietária aprovar a lista; depois executar as rodadas A e B com o orçamento de R$ 15 cadastrado.
-- O ambiente de desenvolvimento em nuvem não alcança a OpenRouter; o catálogo e as rodadas rodam na máquina dela.
+- 24/11/2026: a proprietária autorizou até US$ 10 no total (limite da chave). Gasto até aqui: US$ 7,58.
+- `cardfactory experimento` escolhe candidatos por regra; `cardfactory etapa1 {orcamento|preparar|completo|a|b}`
+  executa as etapas na nuvem com a chave injetada pelo proxy (`OPENROUTER_AUTH_VIA_PROXY=1`).
+- Produção piloto completa (escabiose): 4 documentos, 61 afirmações, 20 objetivos, 23 cards, ~US$ 4,50.
+  A proprietária apontou cards de fonte administrativa regional e frentes longas; o planejador, a política editorial,
+  o auditor pedagógico e uma varredura nova (PED-007) foram ajustados.
+- Rodada A (criadores, mesmos 5 objetivos): DeepSeek V4 Pro US$ 0,008 por card; Sonnet 5.5 US$ 0,028; GPT 6.2 Sol Pro
+  US$ 0,032; Gemini 4 Neon US$ 0,052; Qwen 3.8 Max US$ 0,067; GLM 5.3 não entregou (raciocínio esgotou a saída).
+- Rodada B (auditor científico, KNOWN_DEFECTS dev): GPT 6.2 Sol Pro detectou 5/6 com 3/6 alarmes falsos (artefato das
+  fontes fictícias); DeepSeek detectou 3/6 e perdeu uma dose 10 vezes maior. A auditoria científica fica com o GPT.
+- Relatório: `/mnt/project-files/cardfactory-fase6/etapa1-relatorio.md`; comparação cega dos cards em
+  `rodada-a-comparacao-cega.html`.
+- Próximo: apostila em PDF como fonte principal (só para uso pessoal), checagem barata de atualização na web,
+  imagens sinalizadas no card e figuras extraídas da apostila.
 
 ## Fase 5 — concluída (24/11/2026)
 

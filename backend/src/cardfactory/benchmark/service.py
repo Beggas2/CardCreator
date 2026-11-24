@@ -31,7 +31,7 @@ from cardfactory.providers.base import LLMRequest
 SETS = {"KNOWN_DEFECTS": fixtures.known_defects, "REFERENCE": fixtures.reference_items}
 SUBJECTS = ("DETERMINISTIC", "auditor_scientific", "auditor_pedagogical")
 SCHEMAS = {"auditor_scientific": SCI_AUDIT_V1, "auditor_pedagogical": PED_AUDIT_V1}
-BATCH = 6
+BATCH = 3
 
 
 class BenchmarkError(Exception):
@@ -179,7 +179,7 @@ class BenchmarkService:
                     "referência verificada.\n\n" + "\n\n".join(blocks))
             req = LLMRequest(model_id=model, messages=[{"role": "system", "content": composed.text},
                                                        {"role": "user", "content": user}],
-                             max_output_tokens=12000, idempotency_key=f"bench:{run_id}:{role}:{b}",
+                             max_output_tokens=24000, idempotency_key=f"bench:{run_id}:{role}:{b}",
                              response_schema=SCHEMAS[role], schema_name=schema_name(composed.contract))
             r = await gateway.call(req, budget_ids=budget_ids, stage=f"BENCH_{role}",
                                    prompt_version_ids=composed.version_ids, prompt_hash=composed.hash,
