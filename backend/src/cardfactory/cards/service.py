@@ -228,7 +228,7 @@ class CardService:
                 "origin": card.origin, "notetype": card.notetype, "quarantine": card.quarantine,
                 "production_id": card.production_id, "content": last.content, "schema_version": last.schema_version,
                 "deck_path": last.deck_path, "tags": last.tags,
-                "versions": [{"version_no": v.version_no, "author_type": v.author_type, "note": v.note,
+                "versions": [{"id": v.id, "version_no": v.version_no, "author_type": v.author_type, "note": v.note,
                               "created_at": v.created_at.isoformat(), "content_hash": v.content_hash,
                               "restored_from_version": v.restored_from_version} for v in versions],
                 "findings": [{"id": f.id, "level": f.level, "code": f.code, "message": f.message,

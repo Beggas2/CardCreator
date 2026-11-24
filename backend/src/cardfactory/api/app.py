@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 
 from cardfactory.audit.service import AuditError, AuditService
+from cardfactory.benchmark.service import BenchmarkError, BenchmarkService
 from cardfactory.cards.model import CardError, structural_errors
 from cardfactory.cards.samples import SAMPLES
 from cardfactory.cards.service import CardService, CardServiceError
@@ -50,6 +51,8 @@ from cardfactory.providers.gateway import LLMGateway
 from cardfactory.providers.mock import MockProvider
 from cardfactory.render.palette import PALETTES, contrast
 from cardfactory.render.renderer import render
+from cardfactory.review.service import REASONS as REVIEW_REASONS
+from cardfactory.review.service import ReviewError, ReviewService
 from cardfactory.security.fetch import FetchBlockedError, FetchFailedError, safe_fetch
 from cardfactory.security.secrets import install_log_redaction
 from cardfactory.validation.card_checks import check_card
@@ -231,6 +234,61 @@ class DefectStatusIn(BaseModel):
     status: str
     note: str
     actor: str
+
+
+class ReviewIn(BaseModel):
+    decision: str
+    actor: str
+    reasons: list[str] = []
+    note: str = ""
+    duration_ms: int | None = None
+    started_version_no: int | None = None
+
+
+class ProposalIn(BaseModel):
+    accept: bool
+    actor: str
+    note: str = ""
+
+
+class ActorIn(BaseModel):
+    actor: str
+
+
+class LessonIn(BaseModel):
+    text: str
+    actor: str
+    reason_codes: list[str] = []
+    decision_ids: list[str] = []
+
+
+class LessonStatusIn(BaseModel):
+    status: str
+    actor: str
+
+
+class BenchRunIn(BaseModel):
+    set_name: str
+    split: str = "dev"
+    subject: str = "DETERMINISTIC"
+    actor: str
+    purpose: str = ""
+    provider: str = "mock"
+    models: dict[str, str] = {}
+    budget_id: str | None = None
+
+
+class CompareIn(BaseModel):
+    question: str
+    card_version_ids: list[str]
+    origins: list[str] = []
+
+
+class CompareDecisionIn(BaseModel):
+    choice: str
+    actor: str
+    justification: str
+    ranking: list[str] = []
 
 
 class SkipIn(BaseModel):
@@ -662,6 +720,132 @@ def _routes(app: FastAPI, st: AppState) -> None:  # noqa: C901 - lista plana de 
     @app.get("/api/cards/{card_id}/blockers")
     def card_blockers(card_id: str):
         return {"blockers": aud.blockers(card_id)}
+
+    # ------------------------------------------------------------ revisão humana (Fase 5)
+    rv = ReviewService(db)
+    bench = BenchmarkService(db, registry)
+
+    def _rv(fn, *a, **k):
+        try:
+            return fn(*a, **k)
+        except ReviewError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/api/review/queue")
+    def review_queue(project_id: str | None = None, production_id: str | None = None, state: str | None = None,
+                     deck: str = "", include_done: bool = False):
+        return rv.queue(project_id=project_id, production_id=production_id, state=state, deck=deck,
+                        include_done=include_done)
+
+    @app.get("/api/review/reasons")
+    def review_reasons():
+        return [{"code": k, "label": v[1], "category": v[0]} for k, v in REVIEW_REASONS.items()]
+
+    @app.get("/api/review/cards/{card_id}")
+    def review_detail(card_id: str):
+        return _rv(rv.detail, card_id)
+
+    @app.post("/api/review/cards/{card_id}/decision")
+    def review_decide(card_id: str, b: ReviewIn):
+        return _rv(rv.decide, card_id, b.decision, actor=b.actor, reasons=b.reasons, note=b.note,
+                   duration_ms=b.duration_ms, started_version_no=b.started_version_no)
+
+    @app.post("/api/review/cards/{card_id}/undo")
+    def review_undo(card_id: str, b: ActorIn):
+        return _rv(rv.undo, card_id, actor=b.actor)
+
+    @app.post("/api/review/proposals/{operation_id}")
+    def review_proposal(operation_id: str, b: ProposalIn):
+        return _rv(rv.decide_proposal, operation_id, b.accept, actor=b.actor, note=b.note)
+
+    @app.get("/api/review/insights")
+    def review_insights(project_id: str | None = None):
+        return rv.insights(project_id=project_id)
+
+    @app.get("/api/review/lessons")
+    def review_lessons():
+        return rv.lessons()
+
+    @app.post("/api/review/lessons")
+    def review_add_lesson(b: LessonIn):
+        return {"id": _rv(rv.add_lesson, b.text, actor=b.actor, reason_codes=b.reason_codes,
+                          decision_ids=b.decision_ids)}
+
+    @app.post("/api/review/lessons/{lesson_id}/status")
+    def review_lesson_status(lesson_id: str, b: LessonStatusIn):
+        _rv(rv.set_lesson, lesson_id, b.status, actor=b.actor)
+        return {"ok": True}
+
+    @app.post("/api/review/lessons/promote")
+    def review_promote(b: ActorIn):
+        return _rv(rv.promote_lessons, registry, actor=b.actor)
+
+    # ------------------------------------------------------------ laboratório (Fase 5)
+    def _bm(fn, *a, **k):
+        try:
+            return fn(*a, **k)
+        except BenchmarkError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/api/bench/sets/load")
+    def bench_load():
+        return bench.load_sets()
+
+    @app.get("/api/bench/summary")
+    def bench_summary():
+        return bench.summary()
+
+    @app.get("/api/bench/items")
+    def bench_items(set_name: str, split: str = "dev", actor: str = "", purpose: str = ""):
+        return _bm(bench.items, set_name, split, actor=actor, purpose=purpose)
+
+    @app.post("/api/bench/runs")
+    async def bench_run(b: BenchRunIn):
+        gw, budget_ids = None, []
+        if b.subject != "DETERMINISTIC":
+            if b.provider != "mock" and not b.budget_id:
+                raise HTTPException(400, "benchmark com provedor pago exige orçamento explícito")
+            gw = st.gateway(b.provider)
+            if b.budget_id:
+                budget_ids = [b.budget_id]
+            else:
+                with db.session() as s:
+                    bud = s.execute(select(Budget).where(Budget.scope == "PROJECT", Budget.scope_ref == "mock")) \
+                        .scalar_one_or_none()
+                budget_ids = [bud.id if bud else finance.create_budget("PROJECT", "mock", "0",
+                                                                       "Simulações (sem custo)")]
+        models = b.models or ({"default": "mock/auditor-b"} if b.provider == "mock" else {})
+        try:
+            return await bench.run(b.set_name, b.split, b.subject, actor=b.actor, purpose=b.purpose, gateway=gw,
+                                   provider="" if gw is None else b.provider,
+                                   models={} if gw is None else models, budget_ids=budget_ids)
+        except BenchmarkError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/api/bench/runs")
+    def bench_runs():
+        return bench.runs()
+
+    @app.get("/api/bench/runs/{run_id}")
+    def bench_run_detail(run_id: str):
+        return _bm(bench.run_detail, run_id)
+
+    @app.get("/api/bench/comparisons")
+    def bench_comparisons():
+        return bench.comparisons()
+
+    @app.post("/api/bench/comparisons")
+    def bench_compare(b: CompareIn):
+        return {"id": _bm(bench.create_comparison, b.question, b.card_version_ids, b.origins or None)}
+
+    @app.get("/api/bench/comparisons/{cid}")
+    def bench_comparison(cid: str):
+        return _bm(bench.comparison, cid)
+
+    @app.post("/api/bench/comparisons/{cid}/decision")
+    def bench_compare_decide(cid: str, b: CompareDecisionIn):
+        return _bm(bench.decide_comparison, cid, b.choice, actor=b.actor, justification=b.justification,
+                   ranking=b.ranking)
 
     @app.get("/api/similarity")
     def similarity(project_id: str | None = None, status: str | None = None):

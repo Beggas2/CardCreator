@@ -1,5 +1,26 @@
 # STATUS
 
+## Fase 5 — concluída (24/11/2026)
+
+- **Implementado**:
+  - Mesa de revisão (tela Revisão): fila priorizada (bloqueios e pendências primeiro) com filtros por projeto, estado e deck; prévia, bloqueios, defeitos, afirmações e propostas no mesmo lugar; atalhos de teclado (j/k, a, u).
+  - Aprovação humana distinta da automática: só é aceita sem bloqueio aberto e com o nome de quem revisou. Rejeitar e pedir alteração exigem motivo tipificado (13 motivos ligados às categorias de defeito). Pedir alteração cria defeito de origem HUMAN, que a correção trata.
+  - Decisões append-only com desfazer (nova decisão UNDO que restaura o estado e anula os defeitos que ela criou). Tempo de revisão e "aprovado com edição" registrados.
+  - Propostas da IA (exclusão, fusão, mover, dividir...) só valem com decisão humana. Exclusão aceita vira REJECTED: a nota nunca é apagada.
+  - Aprendizado editorial: frequência de motivos por layout, taxa de aprovação, tempo mediano; lições escritas por humanos, aceitas e incorporadas à política editorial como versão nova do prompt (reversível).
+  - Princípios dos 40 cards de referência analisados (`benchmarks/reference/PRINCIPIOS.md`) e convertidos na política `editorial` (regras gerais, sem copiar exemplos), incluída no criador, no corretor e no auditor pedagógico.
+  - Laboratório: conjuntos KNOWN_DEFECTS (11 defeitos plantados com gabarito + 12 cards limpos) e REFERENCE (40 cards, escabiose = dev, Kawasaki = eval), split eval selado com registro de cada consulta, execuções por varredura determinística ou auditor de IA, métricas de detecção e falso alarme com intervalo exato de Clopper-Pearson, prompt hash, modelo e custo gravados.
+  - Comparação cega: rótulos e ordem aleatórios, origem (card, versão, autor e modelo) revelada só depois da escolha e da justificativa gravadas.
+  - Nova varredura determinística: a frente contém o alvo de recuperação (PED-001).
+- **Efetivamente testado**: 239 testes pytest sem rede (mais 1 opcional) e smoke Playwright passando pelas telas Revisão (pedir alteração e desfazer, 412 px sem rolagem horizontal) e Laboratório (benchmark e comparação cega).
+- **Resultado do benchmark sem custo** (varreduras determinísticas, split dev): detecção 4/6 (IC95% 22–96%), falso alarme 0/6 (IC95% 0–46%). As amostras são pequenas; o intervalo largo é real. Os auditores de IA só rodaram com o simulado, que não detecta nada: o número real depende de autorização de gasto.
+- **Limitações**:
+  - O split eval de KNOWN_DEFECTS tem 11 itens; serve para triagem, não para afirmar taxa de erro baixa.
+  - O conjunto de referência não tem gabarito: o que os auditores apontarem nele precisa de revisão humana.
+  - Propostas MOVE/SPLIT aceitas não são aplicadas automaticamente; a edição é manual.
+- **Custos**: R$ 0,00.
+- **Próxima etapa**: Fase 6 (experimento com modelos reais), **somente com autorização de gasto**. Etapa 1 prevista: microbenchmark de até R$ 15 (BENCHMARK_PROTOCOL §5).
+
 ## Fase 4 — concluída (24/11/2026)
 
 - **Implementado**:

@@ -3,7 +3,7 @@
 # normative: documento integral usado na variante "full" (docs/normative/).
 # required: requisitos que precisam aparecer anotados no prompt composto (test_prompt_rule_coverage).
 version: 1
-policies: [integrity, scientific, pedagogical, visual]
+policies: [integrity, scientific, pedagogical, editorial, visual]
 roles:
   researcher:
     policies: [integrity, scientific]
@@ -21,13 +21,13 @@ roles:
     contract: plan.v1
     required: [PRI-002, COV-001, PED-005, AUD-015]
   creator:
-    policies: [integrity, scientific, pedagogical, visual]
+    policies: [integrity, scientific, pedagogical, editorial, visual]
     normative: Prompt Criação.txt
     contract: generation_batch.v1
     required: [PRI-001, PRI-003, PRI-005, PRI-007, SEC-002, SCI-006, SCI-013, SCI-015, SCI-018, SCI-020,
                PED-001, PED-004, PED-007, PED-010, VIS-001, VIS-005]
   corrector:
-    policies: [integrity, scientific, pedagogical, visual]
+    policies: [integrity, scientific, pedagogical, editorial, visual]
     normative: Prompt Revisor.txt
     contract: correction.v1
     required: [PRI-001, PRI-005, SEC-002, SCI-006, SCI-013, PED-017, AUD-008, AUD-009, INT-003, VIS-001]
@@ -38,7 +38,7 @@ roles:
     required: [PRI-001, SEC-002, AUD-001, AUD-006, AUD-007, SCI-006, SCI-008, SCI-010, SCI-013, SCI-015, SCI-020,
                SCI-022]
   auditor_pedagogical:
-    policies: [integrity, pedagogical, visual]
+    policies: [integrity, pedagogical, editorial, visual]
     normative: Prompt Revisor.txt
     contract: ped_audit.v1
     required: [PRI-001, SEC-002, AUD-006, AUD-008, PED-001, PED-016, PED-017]

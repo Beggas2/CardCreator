@@ -114,6 +114,41 @@ try {
   if (pageOver > 0) throw new Error(`Auditoria rola na horizontal em celular (${pageOver}px)`);
   await page.setViewportSize({ width: 1280, height: 860 });
 
+  // Fase 5: mesa de revisão (pedir alteração, desfazer) e laboratório (benchmark determinístico, comparação cega).
+  await page.getByRole("link", { name: "Revisão" }).click();
+  await page.getByRole("heading", { name: "Fila de revisão" }).waitFor();
+  await page.getByLabel("Seu nome").fill("Revisora de teste");
+  await page.getByRole("list", { name: "Cards na fila" }).getByRole("button").first().click();
+  await page.getByLabel("Frente ambígua ou dependente de contexto").check();
+  await page.getByRole("button", { name: "Pedir alteração" }).click();
+  await page.getByText(/Revisora de teste pediu alteração/).waitFor();
+  await page.getByRole("button", { name: "Desfazer" }).click();
+  await page.getByText(/Revisora de teste desfez/).waitFor();
+  await page.screenshot({ path: join(shots, "12-revisao.png"), fullPage: true });
+  await page.setViewportSize({ width: 412, height: 900 });
+  const revOver = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (revOver > 0) throw new Error(`Revisão rola na horizontal em celular (${revOver}px)`);
+  await page.setViewportSize({ width: 1280, height: 860 });
+
+  await page.getByRole("link", { name: "Laboratório" }).click();
+  await page.getByRole("heading", { name: "Comparação cega" }).waitFor();
+  await page.getByRole("button", { name: "Carregar conjuntos" }).click();
+  await page.getByRole("cell", { name: "KNOWN_DEFECTS" }).waitFor();
+  await page.getByLabel("Seu nome").fill("Avaliadora");
+  await page.getByRole("button", { name: "Executar" }).click();
+  await page.getByText(/detectado/).first().waitFor();
+  await page.getByLabel("Pergunta ao avaliador").fill("Qual card ensina melhor?");
+  const boxes = page.getByRole("group", { name: "Escolha 2 ou mais cards" }).getByRole("checkbox");
+  await boxes.nth(0).check();
+  await boxes.nth(1).check();
+  await page.getByRole("button", { name: "Criar comparação" }).click();
+  await page.getByLabel("Escolha").selectOption({ index: 1 });
+  await page.getByLabel("Justificativa").fill("frente mais delimitada");
+  if (await page.getByText("origem:").count()) throw new Error("origem revelada antes da decisão");
+  await page.getByRole("button", { name: "Gravar escolha" }).click();
+  await page.getByText("origem:").first().waitFor();
+  await page.screenshot({ path: join(shots, "13-laboratorio.png"), fullPage: true });
+
   await page.setViewportSize({ width: 412, height: 900 });
   await page.getByRole("link", { name: "Galeria visual" }).click();
   await page.getByText("L · Integração").waitFor();

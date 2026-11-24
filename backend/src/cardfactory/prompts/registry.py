@@ -197,6 +197,11 @@ class PromptRegistry:
                             "hash": v.content_hash if v else None, "req_ids": v.req_ids if v else []})
             return out
 
+    def active_text(self, key: str) -> str:
+        with self.db.session() as s:
+            p = self._prompt(s, key)
+            return s.get(PromptVersion, p.active_version_id).body
+
     def versions(self, key: str) -> list[dict]:
         with self.db.session() as s:
             p = self._prompt(s, key)

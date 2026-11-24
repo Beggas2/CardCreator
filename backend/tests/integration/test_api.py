@@ -130,7 +130,7 @@ def test_budget_and_authorization_endpoints(client):
 
 def test_prompt_endpoints(client):
     p = client.get("/api/prompts").json()
-    assert len(p["prompts"]) == 17 and all(v == [] for v in p["coverage"].values())
+    assert len(p["prompts"]) == 18 and all(v == [] for v in p["coverage"].values())
     vs = client.get("/api/prompts/role:planner/versions").json()
     v2 = client.put("/api/prompts/role:planner", json={"body": "novo\n", "author": "t"}).json()["version_id"]
     assert "+novo" in client.get("/api/prompts-diff", params={"a": vs[0]["id"], "b": v2}).json()["diff"]

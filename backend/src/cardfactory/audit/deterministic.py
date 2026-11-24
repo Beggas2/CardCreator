@@ -157,6 +157,23 @@ def scan_claim_numbers(content: dict[str, Any], claims: dict[str, dict[str, Any]
     return out
 
 
+def scan_answer_in_front(content: dict[str, Any]) -> list[Hit]:
+    """PED-001: um alvo de recuperação do essencial aparece literalmente na frente (a pergunta entrega a resposta)."""
+    if not is_v2(content):
+        return []
+    front = " ".join(front_plain(content).lower().split())
+    for b in content["answer"]:
+        if b["role"] != "essential":
+            continue
+        for it in b["items"]:
+            for sg in it.get("segments", []):
+                t = " ".join(sg["text"].lower().split()).strip(" .,;:")
+                if sg.get("retrieval_target") and len(t) >= 6 and re.search(rf"(?<!\w){re.escape(t)}(?!\w)", front):
+                    return [Hit("PEDAGOGICAL", "MEDIUM", f"a frente já contém o alvo '{sg['text']}' (PED-001)")]
+    return []
+
+
 def scan_all(content: dict[str, Any], claims: dict[str, dict[str, Any]] | None = None) -> list[Hit]:
     return (scan_deictics(content) + scan_acronyms(content) + scan_redundancy(content) + scan_score_sum(content)
-            + scan_dose_arithmetic(content) + scan_claim_numbers(content, claims or {}))
+            + scan_dose_arithmetic(content) + scan_claim_numbers(content, claims or {})
+            + scan_answer_in_front(content))

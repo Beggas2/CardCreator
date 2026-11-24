@@ -697,3 +697,93 @@ class ProductionVerdict(Timestamped, Base):
     dimension: Mapped[str] = mapped_column(String(30))
     status: Mapped[str] = mapped_column(String(20))
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+# ------------------------------------------------------------------ Fase 5: revisão humana e benchmark
+class ReviewDecision(Timestamped, Base):
+    """[append-only] Decisão humana na mesa de revisão (APR-004). Desfazer é uma nova decisão UNDO."""
+
+    __tablename__ = "review_decision"
+    id: Mapped[str] = _id("rvd")
+    card_id: Mapped[str] = mapped_column(ForeignKey("card.id"), index=True)
+    card_version_id: Mapped[str | None] = mapped_column(ForeignKey("card_version.id"))
+    operation_id: Mapped[str | None] = mapped_column(ForeignKey("operation.id"))  # proposta decidida
+    decision: Mapped[str] = mapped_column(String(20))  # APPROVE | REJECT | REQUEST_CHANGES | ACCEPT | DECLINE | UNDO
+    reasons: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    note: Mapped[str] = mapped_column(Text, default="")
+    actor: Mapped[str] = mapped_column(String(100))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    edited: Mapped[bool] = mapped_column(Boolean, default=False)  # versão nova criada durante a revisão
+    previous_state: Mapped[str] = mapped_column(String(30), default="")
+    new_state: Mapped[str] = mapped_column(String(30), default="")
+    undoes_id: Mapped[str | None] = mapped_column(String(40))
+    defect_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)  # defeitos criados por REQUEST_CHANGES
+
+
+class EditorialLesson(Timestamped, Base):
+    """Aprendizado editorial: lição escrita por humano a partir das decisões; só entra em prompt por ação humana."""
+
+    __tablename__ = "editorial_lesson"
+    id: Mapped[str] = _id("les")
+    text: Mapped[str] = mapped_column(Text)
+    reason_codes: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    source_decision_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="PROPOSED")  # PROPOSED | ACCEPTED | DISCARDED | PROMOTED
+    actor: Mapped[str] = mapped_column(String(100))
+    prompt_version_id: Mapped[str | None] = mapped_column(String(40))
+
+
+class BenchmarkItem(Timestamped, Base):
+    """Item de um conjunto de benchmark (BENCHMARK_PROTOCOL §1), com split dev/eval fixo."""
+
+    __tablename__ = "benchmark_item"
+    __table_args__ = (UniqueConstraint("set_name", "item_key"),)
+    id: Mapped[str] = _id("bmi")
+    set_name: Mapped[str] = mapped_column(String(40), index=True)  # REFERENCE | KNOWN_DEFECTS | ...
+    item_key: Mapped[str] = mapped_column(String(100))
+    split: Mapped[str] = mapped_column(String(4))  # dev | eval
+    card_id: Mapped[str | None] = mapped_column(ForeignKey("card.id"))
+    content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    expected: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # gabarito (categoria, gravidade mínima)
+
+
+class BenchmarkRun(Timestamped, Base):
+    """[append-only] Execução de benchmark com tudo o que identifica o resultado (BENCHMARK_PROTOCOL §7)."""
+
+    __tablename__ = "benchmark_run"
+    id: Mapped[str] = _id("bmr")
+    set_name: Mapped[str] = mapped_column(String(40))
+    split: Mapped[str] = mapped_column(String(4))
+    subject: Mapped[str] = mapped_column(String(40))  # DETERMINISTIC | auditor_scientific | auditor_pedagogical
+    provider: Mapped[str] = mapped_column(String(40), default="")
+    models: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    prompt_hashes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    results: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    cost_usd: Mapped[str] = mapped_column(String(20), default="0")
+    actor: Mapped[str] = mapped_column(String(100), default="")
+
+
+class EvalAccess(Timestamped, Base):
+    """[append-only] Cada consulta ao split eval selado fica registrada e aparece no relatório."""
+
+    __tablename__ = "eval_access"
+    id: Mapped[str] = _id("eva")
+    set_name: Mapped[str] = mapped_column(String(40))
+    purpose: Mapped[str] = mapped_column(Text)
+    actor: Mapped[str] = mapped_column(String(100))
+    run_id: Mapped[str | None] = mapped_column(String(40))
+
+
+class BlindComparison(Timestamped, Base):
+    """Comparação cega (BENCHMARK_PROTOCOL §4): rótulos aleatórios; origem só revelada após a decisão gravada."""
+
+    __tablename__ = "blind_comparison"
+    id: Mapped[str] = _id("blc")
+    question: Mapped[str] = mapped_column(Text)
+    items: Mapped[list[Any]] = mapped_column(JSON, default=list)  # [{label, card_version_id, origin}]
+    choice: Mapped[str | None] = mapped_column(String(4))  # rótulo escolhido ou "TIE"
+    ranking: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    justification: Mapped[str] = mapped_column(Text, default="")
+    actor: Mapped[str] = mapped_column(String(100), default="")
+    decided_at: Mapped[datetime | None]

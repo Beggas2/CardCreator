@@ -10,6 +10,8 @@ import Cards from "./pages/Cards";
 import Gallery from "./pages/Gallery";
 import Exports from "./pages/Exports";
 import Audit from "./pages/Audit";
+import Review from "./pages/Review";
+import Lab from "./pages/Lab";
 
 const PAGES = [
   { id: "painel", label: "Painel", el: <Dashboard /> },
@@ -18,6 +20,8 @@ const PAGES = [
   { id: "conhecimento", label: "Conhecimento", el: <Knowledge /> },
   { id: "cards", label: "Cards", el: <Cards /> },
   { id: "auditoria", label: "Auditoria", el: <Audit /> },
+  { id: "revisao", label: "Revisão", el: <Review /> },
+  { id: "laboratorio", label: "Laboratório", el: <Lab /> },
   { id: "galeria", label: "Galeria visual", el: <Gallery /> },
   { id: "exportacao", label: "Exportação", el: <Exports /> },
   { id: "importacao", label: "Importação", el: <Imports /> },
@@ -46,7 +50,7 @@ export default function App() {
             {p.label}
           </a>
         ))}
-        <div className="nav-foot">Fase 4 · dados locais</div>
+        <div className="nav-foot">Fase 5 · dados locais</div>
       </nav>
       <main className="main">{PAGES.find((p) => p.id === page)!.el}</main>
     </div>
