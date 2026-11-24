@@ -29,7 +29,7 @@ STAGES: list[tuple[str, str | None]] = [
     ("INVENTORY", None), ("RESEARCH", "researcher"), ("RETRIEVAL", None), ("EXTRACTION", "extractor"),
     ("PLANNING", "planner"), ("OBJECTIVES", "planner"), ("GENERATION", "creator"),
     ("AUDIT_SCI", "auditor_scientific"), ("AUDIT_PED", "auditor_pedagogical"), ("AUDIT_COV", "auditor_coverage"),
-    ("CORRECTION", "resolver"), ("REAUDIT", "auditor_scientific"), ("DEDUP", "classifier"),
+    ("CORRECTION", "creator"), ("REAUDIT", "auditor_scientific"), ("DEDUP", "contradiction"),
     ("TECH_VALIDATION", None), ("HUMAN_REVIEW", None), ("EXPORT", None),
 ]
 DEPS: dict[str, list[str]] = {
@@ -172,7 +172,7 @@ def handlers(svc: Services) -> dict[str, Any]:
 
 def mock_responder(req: LLMRequest) -> dict:
     """Respostas determinísticas do provedor simulado para o grafo da Fase 1."""
-    if req.schema_name == "card_v2":
+    if "cards" in ((req.response_schema or {}).get("properties") or {}):
         return {"limitations": ["conteúdo simulado"],
                 "cards": [{"front": f"[SIMULADO] Pergunta {i + 1}?", "essential": f"[SIMULADO] Resposta {i + 1}"}
                           for i in range(3)]}

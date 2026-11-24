@@ -122,7 +122,7 @@ def test_prompt_endpoints(client):
     assert "+novo" in client.get("/api/prompts-diff", params={"a": vs[0]["id"], "b": v2}).json()["diff"]
     client.post(f"/api/prompts/role:planner/restore/{vs[0]['id']}", json={"author": "t"})
     c = client.get("/api/prompts-compose/creator").json()
-    assert c["missing_required"] == [] and c["contract"] == "card.v2"
+    assert c["missing_required"] == [] and c["contract"] == "generation_batch.v1"
 
 
 def test_api_key_never_leaks(tmp_path, monkeypatch, caplog):
