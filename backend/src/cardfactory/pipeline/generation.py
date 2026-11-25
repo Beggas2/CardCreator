@@ -148,7 +148,7 @@ async def generation(svc: ResearchServices, ctx: TaskContext, cards: CardService
             req = LLMRequest(model_id=model, messages=[
                 {"role": "system", "content": composed.text},
                 {"role": "user", "content": _prompt(prd, c, svc_deck_prefix(cards), remaining)}],
-                max_output_tokens=16000, idempotency_key=ctx.call_key(f"gen.b{state['batch']}.s{state['size']}"),
+                max_output_tokens=32000, idempotency_key=ctx.call_key(f"gen.b{state['batch']}.s{state['size']}"),
                 response_schema=GENERATION_BATCH_V1, schema_name=schema_name(composed.contract))
             r = await svc.gateway.call(req, budget_ids=ctx.input["budget_ids"], task_id=ctx.task_id,
                                        stage=ctx.stage, prompt_version_ids=composed.version_ids,

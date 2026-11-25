@@ -41,7 +41,7 @@ from cardfactory.providers.base import LLMRequest
 from cardfactory.providers.gateway import LLMGateway
 
 Fetcher = Callable[[str], Awaitable[tuple[bytes, str | None, str]]]  # url → (bytes, content-type, url final)
-EXTRACTION_BATCH_CHARS = 12000
+EXTRACTION_BATCH_CHARS = 6000  # lotes maiores truncavam (o raciocínio conta na saída) e a chamada era paga à toa
 RESEARCH_CACHE_DAYS = 30
 
 

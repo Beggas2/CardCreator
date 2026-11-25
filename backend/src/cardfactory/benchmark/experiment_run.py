@@ -282,9 +282,12 @@ async def full_run(env: Env, *, theme: str, models: dict[str, str], budget_id: s
     Com document_ids, a produção usa só esses documentos (ex.: apostila) e, com update_since, faz a checagem
     de diretrizes posteriores na web."""
     with env.db.write() as s:
-        prj = s.execute(select(Project).where(Project.name == PROJECT)).scalar_one_or_none()
+        # Produção pela apostila vai para outro projeto: os cards do piloto (outras fontes) não contam como
+        # cobertura dos objetivos dela.
+        name = f"{PROJECT} · apostila" if document_ids else PROJECT
+        prj = s.execute(select(Project).where(Project.name == name)).scalar_one_or_none()
         if prj is None:
-            prj = Project(name=PROJECT)
+            prj = Project(name=name)
             s.add(prj)
             s.flush()
         scope: dict[str, Any] = {"models": models, "experiment": "etapa1-completo"}
