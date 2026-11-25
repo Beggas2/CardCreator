@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+# Documentos normativos: preservar bytes exatos (CRLF original). Deve vir depois da regra geral.
+docs/normative/** -text
+requirements/requirements.csv -text
+# Cards de referência da proprietária: preservar bytes exatos.
+benchmarks/reference/** -text

@@ -1,0 +1,74 @@
+# Composição dos prompts operacionais (PROMPT_REGISTRY.md).
+# policies: políticas incluídas antes do papel, na ordem.
+# normative: documento integral usado na variante "full" (docs/normative/).
+# required: requisitos que precisam aparecer anotados no prompt composto (test_prompt_rule_coverage).
+version: 1
+policies: [integrity, scientific, pedagogical, editorial, visual]
+roles:
+  researcher:
+    policies: [integrity, scientific]
+    normative: null
+    contract: research_result.v1
+    required: [PRI-001, SEC-002, SCI-001, SCI-003, SCI-004, SCI-006, SCI-011]
+  extractor:
+    policies: [integrity, scientific]
+    normative: null
+    contract: extraction.v1
+    required: [SEC-002, SCI-006, SCI-013, SCI-015]
+  planner:
+    policies: [integrity, scientific, pedagogical]
+    normative: Prompt Criação.txt
+    contract: plan.v1
+    required: [PRI-002, COV-001, PED-005, AUD-015]
+  creator:
+    policies: [integrity, scientific, pedagogical, editorial, visual]
+    normative: Prompt Criação.txt
+    contract: generation_batch.v1
+    required: [PRI-001, PRI-003, PRI-005, PRI-007, SEC-002, SCI-006, SCI-013, SCI-015, SCI-018, SCI-020,
+               PED-001, PED-004, PED-007, PED-010, VIS-001, VIS-005]
+  corrector:
+    policies: [integrity, scientific, pedagogical, editorial, visual]
+    normative: Prompt Revisor.txt
+    contract: correction.v1
+    required: [PRI-001, PRI-005, SEC-002, SCI-006, SCI-013, PED-017, AUD-008, AUD-009, INT-003, VIS-001]
+  auditor_scientific:
+    policies: [integrity, scientific]
+    normative: Prompt Revisor.txt
+    contract: sci_audit.v1
+    required: [PRI-001, SEC-002, AUD-001, AUD-006, AUD-007, SCI-006, SCI-008, SCI-010, SCI-013, SCI-015, SCI-020,
+               SCI-022]
+  auditor_pedagogical:
+    policies: [integrity, pedagogical, editorial, visual]
+    normative: Prompt Revisor.txt
+    contract: ped_audit.v1
+    required: [PRI-001, SEC-002, AUD-006, AUD-008, PED-001, PED-016, PED-017]
+  auditor_coverage:
+    policies: [integrity, scientific, pedagogical]
+    normative: Prompt Revisor.txt
+    contract: cov_audit.v1
+    required: [SEC-002, COV-001, AUD-011, AUD-015]
+  auditor_security:
+    policies: [integrity, scientific]
+    normative: Prompt Revisor.txt
+    contract: sec_audit.v1
+    required: [PRI-001, SEC-002, AUD-007, SCI-015, SCI-018, SCI-020]
+  resolver:
+    policies: [integrity, scientific]
+    normative: Prompt Revisor.txt
+    contract: resolution.v1
+    required: [SEC-002, SCI-008, SCI-009, SCI-010, AUD-005]
+  classifier:
+    policies: [integrity, pedagogical]
+    normative: null
+    contract: classification.v1
+    required: [SEC-002, COV-015, COV-018, PED-013]
+  contradiction:
+    policies: [integrity, scientific]
+    normative: null
+    contract: contradiction.v1
+    required: [SEC-002, DED-001, DED-003, DED-004, DED-005]
+  comparator:
+    policies: [integrity, scientific, pedagogical]
+    normative: Prompt Revisor.txt
+    contract: comparison.v1
+    required: [SEC-002, AUD-014, INT-008, AUD-006]
